@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [修复] 桌面发布打包改用冻结可执行文件运行时探针校验 `alphasift.dsa_adapter`，避免 macOS PyInstaller 将模块内嵌进可执行文件时被文件系统/zip 扫描误判为缺失。
+- [文档] 新增 `docs/architecture/code-map.md` 代码地图，提供仓库结构总览、各子系统职责与端到端分析工作流，并登记到文档中心索引。
 
 ## [3.21.0] - 2026-06-07
 
