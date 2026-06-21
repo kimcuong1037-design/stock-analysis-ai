@@ -2343,7 +2343,12 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
         interview_answers: Optional[Dict[str, Any]] = None,
         owner_key: str = "default",
     ) -> Dict[str, Any]:
-        """Create or update the single investor profile for an owner."""
+        """Create or update the single investor profile for an owner.
+
+        Passing ``interview_answers=None`` (the default) leaves any previously
+        stored interview_answers unchanged.  To wipe a profile entirely, use
+        ``clear_investor_profile`` instead.
+        """
         with self.session_scope() as session:
             stmt = select(InvestorProfileRecord).where(
                 InvestorProfileRecord.owner_key == owner_key
