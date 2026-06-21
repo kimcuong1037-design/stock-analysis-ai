@@ -77,6 +77,27 @@ class StrategiesResponse(BaseModel):
     default_strategy_id: str = ""
 
 
+class ProfileResponse(BaseModel):
+    skill_ids: List[str] = []
+    source: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ProfileUpdateRequest(BaseModel):
+    skill_ids: List[str]
+    source: str = "manual"
+    interview_answers: Optional[Dict[str, Any]] = None
+
+
+class InterviewRequest(BaseModel):
+    answers: Dict[str, str]
+
+
+class InterviewResponse(BaseModel):
+    recommended: List[SkillInfo]
+    explanation: str
+
+
 class AgentModelDeployment(BaseModel):
     deployment_id: str
     model: str
@@ -144,6 +165,83 @@ async def get_strategies():
         strategies=payload.skills,
         default_strategy_id=payload.default_skill_id,
     )
+
+def _build_interview_explanation(config, answers: Dict[str, str], recommended: List["SkillInfo"]) -> str:
+    """Return an LLM-generated explanation of the recommendations, falling back to static text."""
+    if not recommended:
+        static = "暂无匹配的策略推荐。"
+    else:
+        static = "根据你的偏好，推荐：" + "；".join(f"{s.name}（{s.description}）" for s in recommended)
+    if not config.is_agent_available():
+        return static
+    try:
+        from src.agent.llm_adapter import LLMToolAdapter
+        adapter = LLMToolAdapter(config)
+        names = "、".join(s.name for s in recommended)
+        prompt = (
+            "你是投资助手。用 2-3 句中文，结合用户偏好解释为什么这些交易策略适合他，不要编造数据。"
+            f"用户偏好：{answers}。推荐策略：{names}。"
+            "各策略简介：" + "；".join(f"{s.name}:{s.description}" for s in recommended)
+        )
+        resp = adapter.call_text([{"role": "user", "content": prompt}], timeout=20)
+        text = (resp.content or "").strip()
+        if not text or getattr(resp, "provider", "") == "error":
+            return static
+        return text
+    except Exception as exc:  # noqa: BLE001 — explanation is best-effort, never blocks
+        logger.warning("interview explanation LLM failed, fallback to static: %s", exc)
+        return static
+
+
+@router.get("/profile", response_model=ProfileResponse)
+async def get_profile():
+    """Return the current investor profile (skill_ids, source, updated_at)."""
+    from src.storage import get_db
+    prof = get_db().get_investor_profile()
+    if not prof:
+        return ProfileResponse()
+    return ProfileResponse(
+        skill_ids=prof["skill_ids"],
+        source=prof["source"],
+        updated_at=str(prof["updated_at"]) if prof.get("updated_at") else None,
+    )
+
+
+@router.put("/profile", response_model=ProfileResponse)
+async def put_profile(request: ProfileUpdateRequest):
+    """Create or update the investor profile. Deduplicates and caps skill_ids at 5."""
+    from src.storage import get_db
+    skill_ids = list(dict.fromkeys(request.skill_ids))[:5]  # dedupe preserving order + cap at 5
+    prof = get_db().upsert_investor_profile(
+        skill_ids,
+        source=request.source,
+        interview_answers=request.interview_answers,
+    )
+    return ProfileResponse(
+        skill_ids=prof["skill_ids"],
+        source=prof["source"],
+        updated_at=str(prof["updated_at"]) if prof.get("updated_at") else None,
+    )
+
+
+@router.post("/profile/interview", response_model=InterviewResponse)
+async def post_interview(request: InterviewRequest):
+    """Run interview recommendation. Does NOT persist the result."""
+    from src.agent.factory import get_skill_manager
+    from src.agent.skills.profile_recommender import recommend_skills
+
+    config = get_config()
+    skill_manager = get_skill_manager(config)
+    available = [s for s in skill_manager.list_skills() if getattr(s, "user_invocable", True)]
+    rec_ids = recommend_skills(request.answers, available, max_count=3)
+    by_id = {s.name: s for s in available}
+    recommended = [
+        SkillInfo(id=s.name, name=s.display_name, description=s.description)
+        for s in (by_id[i] for i in rec_ids if i in by_id)
+    ]
+    explanation = _build_interview_explanation(config, request.answers, recommended)
+    return InterviewResponse(recommended=recommended, explanation=explanation)
+
 
 @router.post("/chat", response_model=ChatResponse)
 async def agent_chat(request: ChatRequest):
