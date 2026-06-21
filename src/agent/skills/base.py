@@ -77,6 +77,7 @@ class Skill:
     execution_context: str = "inline"
     subagent_type: str = ""
     preferred_model: str = ""
+    profile_tags: Dict[str, List[str]] = field(default_factory=dict)
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?(.*)$", re.DOTALL)
@@ -199,6 +200,10 @@ def load_skill_from_yaml(filepath: Union[str, Path]) -> Skill:
         execution_context=str(data.get("context", "inline")).strip() or "inline",
         subagent_type=str(data.get("agent", "")).strip(),
         preferred_model=str(data.get("model", "")).strip(),
+        profile_tags={
+            str(k): _coerce_string_list(v)
+            for k, v in (data.get("profile_tags") or {}).items()
+        },
     )
 
 
