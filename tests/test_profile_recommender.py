@@ -40,3 +40,16 @@ def test_excludes_non_invocable():
     answers = {"horizon": "swing", "risk": "balanced", "style": "trend", "watch": "medium"}
     result = recommend_skills(answers, skills, max_count=5)
     assert "internal" not in result
+
+
+def test_tiebreak_by_default_priority_then_name():
+    # All three skills have no matching profile_tags -> score == 0 for any answers.
+    # Expected sort: lower default_priority first; when equal priority, alphabetical by name.
+    skill_b_pri10 = _skill("bravo", default_priority=10, profile_tags={})
+    skill_a_pri10 = _skill("alpha", default_priority=10, profile_tags={})
+    skill_z_pri5 = _skill("zeta", default_priority=5, profile_tags={})
+    skills = [skill_b_pri10, skill_a_pri10, skill_z_pri5]
+    answers = {"horizon": "long", "risk": "conservative", "style": "value", "watch": "low"}
+    result = recommend_skills(answers, skills, max_count=5)
+    # zeta(pri=5) < alpha(pri=10, name="alpha") < bravo(pri=10, name="bravo")
+    assert result == ["zeta", "alpha", "bravo"]
