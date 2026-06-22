@@ -51,6 +51,7 @@ class AgentResult:
     model: str = ""                            # comma-separated models used (supports fallback)
     error: Optional[str] = None
     messages: List[Dict[str, Any]] = field(default_factory=list)
+    skill_breakdown: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ============================================================

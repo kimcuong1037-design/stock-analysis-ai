@@ -43,6 +43,7 @@ from src.agent.protocols import (
 from src.agent.runner import parse_dashboard_json
 from src.agent.tools.registry import ToolRegistry
 from src.agent.chat_context import build_visible_chat_history
+from src.agent.skills.defaults import is_skill_agent_name, is_skill_consensus_name, extract_skill_id
 from src.config import AGENT_MAX_STEPS_DEFAULT, get_config
 from src.report_language import normalize_report_language
 
@@ -53,6 +54,33 @@ logger = logging.getLogger(__name__)
 
 # Valid orchestrator modes (ordered by cost/depth)
 VALID_MODES = ("quick", "standard", "full", "specialist")
+
+
+def build_skill_breakdown(ctx) -> List[Dict[str, Any]]:
+    """Extract per-skill opinions (pre-consensus, excluding the aggregate).
+
+    Iterates over ctx.opinions and returns one entry per individual skill
+    agent opinion.  The consensus opinion (agent_name="skill_consensus") is
+    explicitly excluded even though it shares the skill_ prefix.
+    """
+    out: List[Dict[str, Any]] = []
+    for op in ctx.opinions:
+        if not is_skill_agent_name(op.agent_name):
+            continue
+        if is_skill_consensus_name(op.agent_name):
+            continue
+        skill_id = extract_skill_id(op.agent_name) or op.agent_name
+        raw = getattr(op, "raw_data", None) or {}
+        out.append({
+            "skill_id": skill_id,
+            "display_name": skill_id,   # API layer enriches via skill_manager (Task 6)
+            "signal": op.signal,
+            "confidence": round(float(op.confidence), 4),
+            "score_adjustment": raw.get("score_adjustment", 0),
+            "reasoning": op.reasoning or raw.get("reasoning", ""),
+            "key_levels": getattr(op, "key_levels", None) or {},
+        })
+    return out
 
 
 @dataclass
@@ -69,6 +97,7 @@ class OrchestratorResult:
     model: str = ""
     error: Optional[str] = None
     stats: Optional[AgentRunStats] = None
+    skill_breakdown: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class AgentOrchestrator:
@@ -565,6 +594,7 @@ class AgentOrchestrator:
                 model=model_str,
                 error="Failed to parse dashboard JSON from agent response",
                 stats=stats,
+                skill_breakdown=ctx.get_data("skill_breakdown") or [],
             )
 
         return OrchestratorResult(
@@ -577,6 +607,7 @@ class AgentOrchestrator:
             provider=provider,
             model=model_str,
             stats=stats,
+            skill_breakdown=ctx.get_data("skill_breakdown") or [],
         )
 
     # -----------------------------------------------------------------
@@ -686,6 +717,9 @@ class AgentOrchestrator:
                 logger.info("[Orchestrator] no skill opinions to aggregate")
         except Exception as exc:
             logger.warning("[Orchestrator] skill aggregation failed: %s", exc)
+        # Store individual opinions AFTER aggregation so consensus is already
+        # in ctx.opinions, but is_skill_consensus_name filter excludes it.
+        ctx.set_data("skill_breakdown", build_skill_breakdown(ctx))
 
     def _aggregate_strategy_opinions(self, ctx: AgentContext) -> None:
         """Compatibility wrapper for legacy tests/imports."""
