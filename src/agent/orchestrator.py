@@ -323,6 +323,7 @@ class AgentOrchestrator:
             provider=orch_result.provider,
             model=orch_result.model,
             error=orch_result.error,
+            skill_breakdown=orch_result.skill_breakdown,
         )
 
     def chat(
@@ -379,6 +380,7 @@ class AgentOrchestrator:
             provider=orch_result.provider,
             model=orch_result.model,
             error=orch_result.error,
+            skill_breakdown=orch_result.skill_breakdown,
         )
 
     # -----------------------------------------------------------------

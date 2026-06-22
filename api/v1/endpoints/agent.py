@@ -61,6 +61,7 @@ class ChatResponse(BaseModel):
     content: str
     session_id: str
     error: Optional[str] = None
+    skill_breakdown: List[Dict[str, Any]] = []
 
 class SkillInfo(BaseModel):
     id: str
@@ -243,6 +244,43 @@ async def post_interview(request: InterviewRequest):
     return InterviewResponse(recommended=recommended, explanation=explanation)
 
 
+def _resolve_effective_skills(config, request_skills: Optional[List[str]]) -> Optional[List[str]]:
+    """Resolve the skills a chat run should use.
+
+    The saved investor profile is only consulted when the caller did NOT pass a
+    skills field (``request_skills is None``). An explicit selection — including
+    an explicit empty list (``[]`` = "no skills, clear context") — is honored
+    verbatim and never overridden by the profile, preserving existing chat
+    semantics. A resolved non-empty list is capped at ``config.agent_compare_max``.
+    """
+    if request_skills is None:
+        from src.storage import get_db
+        prof = get_db().get_investor_profile()
+        skills = list(prof["skill_ids"]) if (prof and prof.get("skill_ids")) else None
+    else:
+        skills = list(request_skills)
+    if not skills:
+        return skills  # None stays None (default behavior); [] stays [] (explicit clear)
+    cap = max(1, getattr(config, "agent_compare_max", 3))
+    return skills[:cap]
+
+
+def _enrich_breakdown_display_names(config, breakdown):
+    """Fill each breakdown item's display_name from the skill manager.
+
+    The orchestrator emits display_name == skill_id; the API resolves the
+    human-readable name here. Returns a list (empty when breakdown is empty).
+    """
+    if not breakdown:
+        return []
+    from src.agent.factory import get_skill_manager
+    names = {s.name: s.display_name for s in get_skill_manager(config).list_skills()}
+    for item in breakdown:
+        skill_id = item.get("skill_id")
+        item["display_name"] = names.get(skill_id) or item.get("display_name") or skill_id
+    return breakdown
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def agent_chat(request: ChatRequest):
     """
@@ -256,7 +294,7 @@ async def agent_chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     
     try:
-        skills = request.effective_skills
+        skills = _resolve_effective_skills(config, request.effective_skills)
         executor = _build_executor(config, skills or None)
 
         # Pass explicit skills into context for the orchestrator.
@@ -278,7 +316,10 @@ async def agent_chat(request: ChatRequest):
             success=result.success,
             content=result.content,
             session_id=session_id,
-            error=result.error
+            error=result.error,
+            skill_breakdown=_enrich_breakdown_display_names(
+                config, getattr(result, "skill_breakdown", []) or []
+            ),
         )
             
     except Exception as e:
@@ -488,9 +529,9 @@ async def agent_chat_stream(request: ChatRequest):
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
-    # Pass explicit skills into context for the orchestrator.
+    # Resolve skills: caller-provided > saved profile, capped at agent_compare_max.
     # Direct assignment so caller-provided skills always take precedence.
-    skills = request.effective_skills
+    skills = _resolve_effective_skills(config, request.effective_skills)
     stream_ctx = dict(request.context or {})
     if skills is not None:
         stream_ctx["skills"] = skills
@@ -519,6 +560,9 @@ async def agent_chat_stream(request: ChatRequest):
                     "error": result.error,
                     "total_steps": result.total_steps,
                     "session_id": session_id,
+                    "skill_breakdown": _enrich_breakdown_display_names(
+                        config, getattr(result, "skill_breakdown", []) or []
+                    ),
                 }),
                 loop,
             )

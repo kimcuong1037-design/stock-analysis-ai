@@ -98,6 +98,7 @@ def _has_gotify_base_url(value: Optional[str]) -> bool:
 
 
 AGENT_MAX_STEPS_DEFAULT = 10
+AGENT_COMPARE_MAX_DEFAULT = 3
 FUNDAMENTAL_STAGE_TIMEOUT_SECONDS_DEFAULT = 8.0
 NEWS_STRATEGY_WINDOWS: Dict[str, int] = {
     "ultra_short": 1,
@@ -728,6 +729,7 @@ class Config:
     agent_arch: str = "single"     # Agent architecture: 'single' (legacy) or 'multi' (orchestrator)
     agent_orchestrator_mode: str = "standard"  # Orchestrator mode: quick/standard/full/specialist
     agent_orchestrator_timeout_s: int = 600  # Cooperative timeout budget for the whole multi-agent pipeline
+    agent_compare_max: int = AGENT_COMPARE_MAX_DEFAULT  # Max strategies evaluated per multi-strategy comparison (clamped 1-5)
     agent_risk_override: bool = True  # Allow risk agent to veto buy signals
     agent_deep_research_budget: int = 30000  # Max token budget for deep research
     agent_deep_research_timeout: int = 180  # Max seconds for /research command before returning timeout
@@ -1041,6 +1043,13 @@ class Config:
                 self.agent_skill_routing, self._VALID_SKILL_ROUTING,
             )
             object.__setattr__(self, "agent_skill_routing", "auto")
+        # Clamp comparison fan-out to a sane 1-5 range (parse_env_int enforces the
+        # lower bound; the upper bound is normalized here).
+        try:
+            _compare_max = int(self.agent_compare_max)
+        except (TypeError, ValueError):
+            _compare_max = AGENT_COMPARE_MAX_DEFAULT
+        object.__setattr__(self, "agent_compare_max", max(1, min(5, _compare_max)))
         normalized_profile = normalize_agent_context_compression_profile(
             self.agent_context_compression_profile
         )
@@ -1518,6 +1527,12 @@ class Config:
                 600,
                 field_name='AGENT_ORCHESTRATOR_TIMEOUT_S',
                 minimum=0,
+            ),
+            agent_compare_max=parse_env_int(
+                os.getenv('AGENT_COMPARE_MAX'),
+                AGENT_COMPARE_MAX_DEFAULT,
+                field_name='AGENT_COMPARE_MAX',
+                minimum=1,
             ),
             agent_risk_override=os.getenv('AGENT_RISK_OVERRIDE', 'true').lower() == 'true',
             agent_deep_research_budget=parse_env_int(
