@@ -93,6 +93,18 @@ def test_chat_response_has_skill_breakdown_field():
     assert "skill_breakdown" in ChatResponse.model_fields
 
 
+def test_skills_endpoint_exposes_category_and_profile_tags(tmp_path: Path):
+    """StrategyCenter groups by category; getSkills must expose category + profile_tags."""
+    client = _make_client(tmp_path)
+    r = client.get("/api/v1/agent/skills")
+    assert r.status_code == 200
+    skills = r.json()["skills"]
+    assert len(skills) >= 1
+    for s in skills:
+        assert "category" in s and isinstance(s["category"], str) and s["category"]
+        assert "profile_tags" in s and isinstance(s["profile_tags"], dict)
+
+
 def test_compare_max_config_default(tmp_path: Path):
     DatabaseManager.reset_instance()
     Config.reset_instance()

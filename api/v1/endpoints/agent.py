@@ -67,6 +67,8 @@ class SkillInfo(BaseModel):
     id: str
     name: str
     description: str
+    category: str = "trend"
+    profile_tags: Dict[str, List[str]] = {}
 
 class SkillsResponse(BaseModel):
     skills: List[SkillInfo]
@@ -123,6 +125,18 @@ async def get_agent_models():
     )
 
 
+def _skill_to_info(skill) -> SkillInfo:
+    """Build a SkillInfo payload, resolving profile_tags (with category fallback)."""
+    from src.agent.skills.profile_tags import resolve_profile_tags
+    return SkillInfo(
+        id=skill.name,
+        name=skill.display_name,
+        description=skill.description,
+        category=getattr(skill, "category", "trend") or "trend",
+        profile_tags=resolve_profile_tags(skill),
+    )
+
+
 def _build_skills_response(config) -> SkillsResponse:
     from src.agent.factory import get_skill_manager
     from src.agent.skills.defaults import get_primary_default_skill_id
@@ -141,7 +155,7 @@ def _build_skills_response(config) -> SkillsResponse:
         ),
     )
     skills = [
-        SkillInfo(id=skill.name, name=skill.display_name, description=skill.description)
+        _skill_to_info(skill)
         for skill in available_skills
     ]
     return SkillsResponse(
@@ -237,7 +251,7 @@ async def post_interview(request: InterviewRequest):
     rec_ids = recommend_skills(request.answers, available, max_count=3)
     by_id = {s.name: s for s in available}
     recommended = [
-        SkillInfo(id=s.name, name=s.display_name, description=s.description)
+        _skill_to_info(s)
         for s in (by_id[i] for i in rec_ids if i in by_id)
     ]
     explanation = _build_interview_explanation(config, request.answers, recommended)
