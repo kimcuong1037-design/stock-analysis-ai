@@ -27,11 +27,20 @@ export interface SkillInfo {
   id: string;
   name: string;
   description: string;
+  category?: string;
+  profileTags?: Record<string, string[]>;
+  isDefault?: boolean;
 }
 
 export interface SkillsResponse {
   skills: SkillInfo[];
   default_skill_id: string;
+}
+
+export interface InvestorProfile {
+  skillIds: string[];
+  source: string | null;
+  updatedAt: string | null;
 }
 
 export interface ChatSessionItem {
@@ -57,8 +66,55 @@ export const agentApi = {
     return response.data;
   },
   async getSkills(): Promise<SkillsResponse> {
-    const response = await apiClient.get<SkillsResponse>('/api/v1/agent/skills');
-    return response.data;
+    const response = await apiClient.get<{
+      skills: Array<{
+        id: string;
+        name: string;
+        description: string;
+        category?: string;
+        profile_tags?: Record<string, string[]>;
+      }>;
+      default_skill_id: string;
+    }>('/api/v1/agent/skills');
+    const data = response.data;
+    return {
+      default_skill_id: data.default_skill_id,
+      skills: data.skills.map((s) => ({
+        id: s.id,
+        name: s.name,
+        description: s.description,
+        category: s.category,
+        profileTags: s.profile_tags,
+        isDefault: s.id === data.default_skill_id,
+      })),
+    };
+  },
+  async getProfile(): Promise<InvestorProfile> {
+    const response = await apiClient.get<{ skill_ids: string[]; source: string | null; updated_at: string | null }>(
+      '/api/v1/agent/profile',
+    );
+    const data = response.data;
+    return { skillIds: data.skill_ids ?? [], source: data.source ?? null, updatedAt: data.updated_at ?? null };
+  },
+  async putProfile(p: {
+    skillIds: string[];
+    source?: string;
+    interviewAnswers?: Record<string, unknown>;
+  }): Promise<InvestorProfile> {
+    const response = await apiClient.put<{ skill_ids: string[]; source: string | null; updated_at: string | null }>(
+      '/api/v1/agent/profile',
+      { skill_ids: p.skillIds, source: p.source, interview_answers: p.interviewAnswers },
+    );
+    const data = response.data;
+    return { skillIds: data.skill_ids ?? [], source: data.source ?? null, updatedAt: data.updated_at ?? null };
+  },
+  async submitInterview(answers: Record<string, string>): Promise<{ recommended: SkillInfo[]; explanation: string }> {
+    const response = await apiClient.post<{ recommended: SkillInfo[]; explanation: string }>(
+      '/api/v1/agent/profile/interview',
+      { answers },
+    );
+    const data = response.data;
+    return { recommended: data.recommended ?? [], explanation: data.explanation ?? '' };
   },
   async getChatSessions(limit = 50): Promise<ChatSessionItem[]> {
     const response = await apiClient.get<{ sessions: ChatSessionItem[] }>('/api/v1/agent/chat/sessions', { params: { limit } });
