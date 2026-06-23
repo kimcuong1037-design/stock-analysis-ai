@@ -275,10 +275,15 @@ def _enrich_breakdown_display_names(config, breakdown):
         return []
     from src.agent.factory import get_skill_manager
     names = {s.name: s.display_name for s in get_skill_manager(config).list_skills()}
-    for item in breakdown:
-        skill_id = item.get("skill_id")
-        item["display_name"] = names.get(skill_id) or item.get("display_name") or skill_id
-    return breakdown
+    return [
+        {
+            **item,
+            "display_name": names.get(item.get("skill_id"))
+            or item.get("display_name")
+            or item.get("skill_id"),
+        }
+        for item in breakdown
+    ]
 
 
 @router.post("/chat", response_model=ChatResponse)

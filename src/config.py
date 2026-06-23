@@ -1533,6 +1533,7 @@ class Config:
                 AGENT_COMPARE_MAX_DEFAULT,
                 field_name='AGENT_COMPARE_MAX',
                 minimum=1,
+                maximum=5,
             ),
             agent_risk_override=os.getenv('AGENT_RISK_OVERRIDE', 'true').lower() == 'true',
             agent_deep_research_budget=parse_env_int(
