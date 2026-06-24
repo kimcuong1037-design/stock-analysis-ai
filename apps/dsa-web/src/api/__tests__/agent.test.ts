@@ -40,6 +40,18 @@ describe('agentApi profile', () => {
     expect(result.updatedAt).toBe('2026-01-01T00:00:00Z');
   });
 
+  it('putProfile defaults source to "manual" when omitted', async () => {
+    put.mockResolvedValueOnce({
+      data: { skill_ids: ['bull_trend'], source: 'manual', updated_at: null },
+    });
+    await agentApi.putProfile({ skillIds: ['bull_trend'] });
+    expect(put).toHaveBeenCalledWith('/api/v1/agent/profile', {
+      skill_ids: ['bull_trend'],
+      source: 'manual',
+      interview_answers: undefined,
+    });
+  });
+
   it('submitInterview posts answers and returns recommended + explanation', async () => {
     const recommended = [
       { id: 'bull_trend', name: 'Bull Trend', description: 'Trend following', category: 'trend', profileTags: { horizon: ['long'] } },
@@ -54,6 +66,20 @@ describe('agentApi profile', () => {
     expect(result.recommended).toHaveLength(1);
     expect(result.recommended[0].id).toBe('bull_trend');
     expect(result.explanation).toBe('Based on your answers...');
+  });
+
+  it('submitInterview remaps snake_case profile_tags to camelCase profileTags', async () => {
+    post.mockResolvedValueOnce({
+      data: {
+        recommended: [
+          { id: 'hot_theme', name: '热门主题', description: 'd', category: 'theme', profile_tags: { style: ['theme'] } },
+        ],
+        explanation: 'x',
+      },
+    });
+    const result = await agentApi.submitInterview({ horizon: 'short' });
+    expect(result.recommended[0].profileTags).toEqual({ style: ['theme'] });
+    expect(result.explanation).toBe('x');
   });
 
   it('getSkills maps profile_tags to profileTags, keeps category, sets isDefault from default_skill_id', async () => {
