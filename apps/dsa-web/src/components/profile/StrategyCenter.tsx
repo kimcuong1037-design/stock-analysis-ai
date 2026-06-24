@@ -10,13 +10,13 @@ import { cn } from '../../utils/cn';
 const CATEGORY_ORDER = ['trend', 'pattern', 'reversal', 'framework'] as const;
 type KnownCategory = (typeof CATEGORY_ORDER)[number];
 
-const CATEGORY_I18N_KEY: Record<KnownCategory | 'other', `strategyCenter.category.${string}`> = {
+const CATEGORY_I18N_KEY = {
   trend: 'strategyCenter.category.trend',
   pattern: 'strategyCenter.category.pattern',
   reversal: 'strategyCenter.category.reversal',
   framework: 'strategyCenter.category.framework',
   other: 'strategyCenter.category.other',
-} as const;
+} as const satisfies Record<KnownCategory | 'other', string>;
 
 interface SkillCardProps {
   skill: SkillInfo;
@@ -103,7 +103,7 @@ export const StrategyCenter: React.FC<StrategyCenterProps> = ({
   const { t } = useUiLanguage();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +118,7 @@ export const StrategyCenter: React.FC<StrategyCenterProps> = ({
       })
       .catch(() => {
         if (!cancelled) {
-          setError(t('strategyCenter.loadingError'));
+          setHasError(true);
           setLoading(false);
         }
       });
@@ -126,7 +126,7 @@ export const StrategyCenter: React.FC<StrategyCenterProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [t]);
+  }, []);
 
   const handleToggle = (id: string) => {
     if (selected.includes(id)) {
@@ -196,12 +196,12 @@ export const StrategyCenter: React.FC<StrategyCenterProps> = ({
       {loading && <Loading />}
 
       {/* Error state */}
-      {!loading && error && (
-        <InlineAlert variant="danger" message={error} />
+      {!loading && hasError && (
+        <InlineAlert variant="danger" message={t('strategyCenter.loadingError')} />
       )}
 
       {/* Empty state */}
-      {!loading && !error && skills.length === 0 && (
+      {!loading && !hasError && skills.length === 0 && (
         <EmptyState
           title={t('strategyCenter.emptyTitle')}
           description={t('strategyCenter.emptyDescription')}
@@ -209,7 +209,7 @@ export const StrategyCenter: React.FC<StrategyCenterProps> = ({
       )}
 
       {/* Grouped skill cards */}
-      {!loading && !error && grouped.map((group) => (
+      {!loading && !hasError && grouped.map((group) => (
         <section key={group.category} aria-label={group.label}>
           <h4 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-text">
             {group.label}

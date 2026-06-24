@@ -24,6 +24,15 @@ describe('StrategyCenter', () => {
     expect(await screen.findByText('头肩顶')).toBeInTheDocument();
   });
 
+  it('renders category group headings for each present category', async () => {
+    render(<StrategyCenter selected={[]} onChange={() => {}} maxSelected={3} />);
+    // The mock data has: bull_trend (trend), head_shoulders (pattern), chan_theory (framework)
+    // Headings are rendered via i18n zh fallback: 趋势, 形态, 框架
+    expect(await screen.findByText('趋势')).toBeInTheDocument();
+    expect(await screen.findByText('形态')).toBeInTheDocument();
+    expect(await screen.findByText('框架')).toBeInTheDocument();
+  });
+
   it('shows skill descriptions', async () => {
     render(<StrategyCenter selected={[]} onChange={() => {}} maxSelected={3} />);
     expect(await screen.findByText('多头趋势策略')).toBeInTheDocument();
