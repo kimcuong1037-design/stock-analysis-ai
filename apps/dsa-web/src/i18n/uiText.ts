@@ -392,6 +392,18 @@ const zh = {
   'settings.viewConfigItems': '查看配置项',
   'settings.envExportNote': '导出内容仅包含当前已保存配置，不包含页面上尚未保存的本地草稿。',
   'settings.envDockerNote': 'Docker 部署中，`--env-file` / Compose `env_file` 只会在启动时注入环境变量；此处导出/导入的是后端当前活跃的 `.env` 文件。若需要让 WebUI 保存值随容器重建保留，请将 `ENV_FILE` 指向 `/app/data/runtime.env` 等可写数据卷文件，并避免启动环境里继续保留同名旧值。',
+
+  'strategyCenter.title': '策略中心',
+  'strategyCenter.loadingError': '策略加载失败',
+  'strategyCenter.emptyTitle': '暂无可用策略',
+  'strategyCenter.emptyDescription': '后端未返回任何策略，请检查配置后重试。',
+  'strategyCenter.selectedCount': '已选 {count} / {max}',
+  'strategyCenter.maxReachedHint': '已达最大选择数量，请先取消选中某项再添加。',
+  'strategyCenter.category.trend': '趋势',
+  'strategyCenter.category.pattern': '形态',
+  'strategyCenter.category.reversal': '反转',
+  'strategyCenter.category.framework': '框架',
+  'strategyCenter.category.other': '其他',
 } as const;
 
 export type UiTextKey = keyof typeof zh;
@@ -788,6 +800,18 @@ const en: Record<UiTextKey, string> = {
   'settings.viewConfigItems': 'View fields',
   'settings.envExportNote': 'Exports include only currently saved configuration, not unsaved local drafts on the page.',
   'settings.envDockerNote': 'In Docker deployments, --env-file and Compose env_file inject environment variables only at startup. This export/import area uses the backend active .env file. To keep WebUI-saved values across container rebuilds, point ENV_FILE to a writable data-volume file such as /app/data/runtime.env and avoid keeping same-name old values in the startup environment.',
+
+  'strategyCenter.title': 'Strategy Center',
+  'strategyCenter.loadingError': 'Failed to load strategies',
+  'strategyCenter.emptyTitle': 'No strategies available',
+  'strategyCenter.emptyDescription': 'No strategies were returned by the server. Check your configuration and try again.',
+  'strategyCenter.selectedCount': '{count} / {max} selected',
+  'strategyCenter.maxReachedHint': 'Maximum selections reached. Deselect one to add another.',
+  'strategyCenter.category.trend': 'Trend',
+  'strategyCenter.category.pattern': 'Pattern',
+  'strategyCenter.category.reversal': 'Reversal',
+  'strategyCenter.category.framework': 'Framework',
+  'strategyCenter.category.other': 'Other',
 };
 
 export const UI_TEXT: Record<UiLanguage, Record<UiTextKey, string>> = {
