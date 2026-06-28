@@ -89,8 +89,8 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
     const next = { ...answers, [key]: value };
     setAnswers(next);
 
-    // Auto-submit once all 4 are answered
-    if (QUESTIONS.every((q) => next[q.key] !== undefined)) {
+    // Auto-submit once all 4 are answered — only from the questions phase
+    if (state.phase === 'questions' && QUESTIONS.every((q) => next[q.key] !== undefined)) {
       void submit(next as Record<QuestionKey, string>);
     }
   };
@@ -144,13 +144,12 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
       {(state.phase === 'questions' || state.phase === 'error') && (
         <div className="space-y-6">
           {QUESTIONS.map((q, idx) => {
-            const answered = answers[q.key] !== undefined;
             return (
               <section key={q.key} aria-label={t(q.titleI18n as Parameters<typeof t>[0])}>
                 <p
                   className={cn(
                     'mb-3 text-sm font-medium',
-                    answered ? 'text-foreground' : 'text-foreground',
+                    'text-foreground',
                   )}
                 >
                   <span className="mr-1 text-xs text-muted-text">{idx + 1}.</span>
@@ -189,7 +188,7 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
               current: Math.min(Object.keys(answers).length + 1, QUESTIONS.length),
               total: QUESTIONS.length,
             })}
-            {allAnswered && ' — ' + t('interviewWizard.loading')}
+            {state.phase === 'questions' && allAnswered && ' — ' + t('interviewWizard.loading')}
           </p>
         </div>
       )}
@@ -236,7 +235,7 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
             <Button
               variant="ghost"
               size="sm"
-              data-testid="interview-skip"
+              data-testid="interview-skip-result"
               onClick={onSkip}
             >
               {t('interviewWizard.skip')}

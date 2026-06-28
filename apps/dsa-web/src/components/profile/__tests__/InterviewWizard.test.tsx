@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { InterviewWizard } from '../InterviewWizard';
 
 vi.mock('../../../api/agent', () => ({
@@ -26,6 +26,15 @@ async function answerAllQuestions() {
 }
 
 describe('InterviewWizard', () => {
+  beforeEach(async () => {
+    const { agentApi } = await import('../../../api/agent');
+    vi.mocked(agentApi.submitInterview).mockClear();
+    vi.mocked(agentApi.submitInterview).mockResolvedValue({
+      recommended: [{ id: 'hot_theme', name: '热门主题', description: '题材策略' }],
+      explanation: '适合你',
+    });
+  });
+
   it('shows recommendation after answering all 4 questions', async () => {
     const onComplete = vi.fn();
     render(<InterviewWizard onComplete={onComplete} onSkip={() => {}} />);
@@ -49,6 +58,7 @@ describe('InterviewWizard', () => {
         style: 'trend',
         watch: 'high',
       });
+      expect(agentApi.submitInterview).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -96,5 +106,19 @@ describe('InterviewWizard', () => {
     await waitFor(() => {
       expect(screen.getByTestId('interview-error')).toBeInTheDocument();
     });
+  });
+
+  it('calls onSkip from result-phase skip button (interview-skip-result)', async () => {
+    const onSkip = vi.fn();
+    render(<InterviewWizard onComplete={() => {}} onSkip={onSkip} />);
+
+    await answerAllQuestions();
+
+    // Wait for result phase
+    await screen.findByTestId('interview-adopt');
+
+    const resultSkipBtn = screen.getByTestId('interview-skip-result');
+    fireEvent.click(resultSkipBtn);
+    expect(onSkip).toHaveBeenCalled();
   });
 });
