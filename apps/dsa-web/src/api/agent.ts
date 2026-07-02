@@ -16,11 +16,22 @@ export interface ChatStreamRequest extends ChatRequest {
   context?: unknown;
 }
 
+export interface SkillBreakdownItem {
+  skill_id: string;
+  display_name: string;
+  signal: string;
+  confidence: number;
+  score_adjustment: number;
+  reasoning: string;
+  key_levels: Record<string, unknown>;
+}
+
 export interface ChatResponse {
   success: boolean;
   content: string;
   session_id: string;
   error?: string;
+  skill_breakdown?: SkillBreakdownItem[];
 }
 
 export interface SkillInfo {

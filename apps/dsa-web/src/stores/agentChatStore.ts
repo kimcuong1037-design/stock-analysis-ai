@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { agentApi } from '../api/agent';
-import type { ChatSessionItem, ChatStreamRequest } from '../api/agent';
+import type { ChatSessionItem, ChatStreamRequest, SkillBreakdownItem } from '../api/agent';
 import {
   getParsedApiError,
   isApiRequestError,
@@ -31,6 +31,7 @@ export interface Message {
   skillNames?: string[];
   skillName?: string;
   thinkingSteps?: ProgressStep[];
+  skillBreakdown?: SkillBreakdownItem[];
 }
 
 export interface StreamMeta {
@@ -44,6 +45,7 @@ type StreamFailureEvent = {
   content?: string;
   error?: unknown;
   message?: unknown;
+  skill_breakdown?: SkillBreakdownItem[];
 };
 
 function getFirstMeaningfulStreamError(...candidates: Array<unknown>): unknown {
@@ -269,6 +271,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       const decoder = new TextDecoder();
       let buf = '';
       let finalContent: string | null = null;
+      let finalSkillBreakdown: SkillBreakdownItem[] = [];
       const currentProgressSteps: ProgressStep[] = [];
         const processLine = (line: string) => {
           if (!line.startsWith('data: ')) return;
@@ -280,6 +283,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
               throw getStreamFailureError(doneEvent, '大模型调用出错，请检查 API Key 配置');
             }
             finalContent = doneEvent.content ?? '';
+            finalSkillBreakdown = doneEvent.skill_breakdown ?? [];
             return;
           }
 
@@ -336,6 +340,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
               skillNames,
               skillName,
               thinkingSteps: [...currentProgressSteps],
+              skillBreakdown: finalSkillBreakdown,
             },
           ],
         }));

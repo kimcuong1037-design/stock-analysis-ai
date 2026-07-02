@@ -446,6 +446,19 @@ const zh = {
   'profilePage.saveSuccess': '画像已保存',
   'profilePage.saveError': '保存失败，请重试',
   'profilePage.manualEmptyHint': '请至少选择一个策略后再保存。',
+
+  'skillBreakdown.title': '策略对比',
+  'skillBreakdown.columnSkill': '策略',
+  'skillBreakdown.columnSignal': '信号',
+  'skillBreakdown.columnConfidence': '置信度',
+  'skillBreakdown.columnScoreAdjustment': '打分调整',
+  'skillBreakdown.reasoningLabel': '分析依据',
+  'skillBreakdown.keyLevelsLabel': '关键位',
+  'skillBreakdown.signal.strongBuy': '强烈买入',
+  'skillBreakdown.signal.buy': '买入',
+  'skillBreakdown.signal.hold': '持有',
+  'skillBreakdown.signal.sell': '卖出',
+  'skillBreakdown.signal.strongSell': '强烈卖出',
 } as const;
 
 export type UiTextKey = keyof typeof zh;
@@ -896,6 +909,19 @@ const en: Record<UiTextKey, string> = {
   'profilePage.saveSuccess': 'Profile saved',
   'profilePage.saveError': 'Save failed, please retry',
   'profilePage.manualEmptyHint': 'Select at least one strategy before saving.',
+
+  'skillBreakdown.title': 'Strategy Comparison',
+  'skillBreakdown.columnSkill': 'Strategy',
+  'skillBreakdown.columnSignal': 'Signal',
+  'skillBreakdown.columnConfidence': 'Confidence',
+  'skillBreakdown.columnScoreAdjustment': 'Score Adj.',
+  'skillBreakdown.reasoningLabel': 'Reasoning',
+  'skillBreakdown.keyLevelsLabel': 'Key Levels',
+  'skillBreakdown.signal.strongBuy': 'Strong Buy',
+  'skillBreakdown.signal.buy': 'Buy',
+  'skillBreakdown.signal.hold': 'Hold',
+  'skillBreakdown.signal.sell': 'Sell',
+  'skillBreakdown.signal.strongSell': 'Strong Sell',
 };
 
 export const UI_TEXT: Record<UiLanguage, Record<UiTextKey, string>> = {

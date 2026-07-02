@@ -9,6 +9,7 @@ import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, S
 import { getParsedApiError } from '../api/error';
 import type { SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
+import { SkillBreakdownTable } from '../components/chat/SkillBreakdownTable';
 import {
   useAgentChatStore,
   type Message,
@@ -1040,6 +1041,9 @@ const ChatPage: React.FC = () => {
                             {msg.content}
                           </Markdown>
                         </div>
+                        {msg.skillBreakdown && msg.skillBreakdown.length > 0 && (
+                          <SkillBreakdownTable items={msg.skillBreakdown} />
+                        )}
                       </div>
                     ) : (
                       msg.content
