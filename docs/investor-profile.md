@@ -77,7 +77,7 @@ Web 端 `ChatPage.tsx` 首次加载会用 `GET /api/v1/agent/profile` 预填策�
 ```
 
 - 环境变量未设置时默认 `3`（`AGENT_COMPARE_MAX_DEFAULT`）；配置值会被强制夹在 `[1, 5]` 区间内（`src/config.py`）。
-- 该值只影响 API 层解析出的候选技能列表长度，不需要重启即可通过修改 `.env` + 重启进程生效（无 Web 侧配置项）。
+- 该值同时约束两处：API 层 `_resolve_effective_skills` 解析出的候选技能列表长度，以及 `AgentOrchestrator._build_specialist_agents` 内部实际并发评估、体现在 `skill_breakdown` 中的策略数量（两处都读取同一个 `config.agent_compare_max`）。修改 `.env` 后重启进程生效（无 Web 侧配置项）。
 
 ### 前置条件：需要 `AGENT_ARCH=multi` + `AGENT_ORCHESTRATOR_MODE=specialist`
 
@@ -138,7 +138,6 @@ AGENT_ORCHESTRATOR_MODE=specialist
 
 ## 已知限制
 
-- **`AGENT_COMPARE_MAX` 与 specialist 编排的并发上限不完全一致**：`api/v1/endpoints/agent.py::_resolve_effective_skills` 会按 `AGENT_COMPARE_MAX`（1-5）截断候选技能列表并写入编排上下文；但 `AgentOrchestrator._build_specialist_agents` 内部通过 `SkillRouter.select_skills(ctx)`（默认 `max_count=3`）与随后的 `selected[:3]` 又做了一次硬编码截断。因此即使把 `AGENT_COMPARE_MAX` 调到 4 或 5，实际参与评估、体现在 `skill_breakdown` 中的策略数量目前仍不超过 **3**；`AGENT_COMPARE_MAX>3` 时只改变了传入编排上下文的候选列表长度，不改变最终对比数量。
 - **Web 问股策略选择框的上限是前端独立常量**：`ChatPage.tsx` 的 `MAX_SELECTED_SKILLS=3` 是硬编码的前端限制，与后端 `AGENT_COMPARE_MAX` 配置无关联；调高 `AGENT_COMPARE_MAX` 不会让问股页允许勾选超过 3 个策略（画像页 `StrategyCenter` 的上限 5 与此无关，二者是不同页面的独立限制）。
 - **「通用分析」与未选择策略在请求层面等价**：`ChatPage.tsx` 只有选中策略非空时才在请求体中附带 `skills` 字段；显式勾选「通用分析」（清空选择）与从未选择过策略一样都不发送该字段，因此都会被服务端的画像回退接管——如果用户已保存投资画像，即使在问股页显式选择「通用分析」，实际请求仍可能带上画像中的策略。
 

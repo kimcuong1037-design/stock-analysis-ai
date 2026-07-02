@@ -44,7 +44,7 @@ from src.agent.runner import parse_dashboard_json
 from src.agent.tools.registry import ToolRegistry
 from src.agent.chat_context import build_visible_chat_history
 from src.agent.skills.defaults import is_skill_agent_name, is_skill_consensus_name, extract_skill_id
-from src.config import AGENT_MAX_STEPS_DEFAULT, get_config
+from src.config import AGENT_COMPARE_MAX_DEFAULT, AGENT_MAX_STEPS_DEFAULT, get_config
 from src.report_language import normalize_report_language
 
 if TYPE_CHECKING:
@@ -678,6 +678,22 @@ class AgentOrchestrator:
         else:
             return [technical, intel, decision]
 
+    def _get_compare_max(self) -> int:
+        """Return the configured cap on concurrent specialist skills.
+
+        Mirrors ``config.agent_compare_max`` (env ``AGENT_COMPARE_MAX``),
+        which ``Config.__post_init__`` already clamps to 1-5. Falls back to
+        the same default (3) when no config is wired in (e.g. some test
+        constructions), and re-clamps defensively in case a caller injects
+        an out-of-range value directly.
+        """
+        raw_value = getattr(self.config, "agent_compare_max", AGENT_COMPARE_MAX_DEFAULT)
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            value = AGENT_COMPARE_MAX_DEFAULT
+        return max(1, min(5, value))
+
     def _build_specialist_agents(self, ctx: AgentContext) -> list:
         """Build specialist sub-agents based on requested skills.
 
@@ -692,14 +708,15 @@ class AgentOrchestrator:
                 skill_instructions=self.skill_instructions,
                 technical_skill_policy=self.technical_skill_policy,
             )
+            compare_max = self._get_compare_max()
             router = SkillRouter()
-            selected = router.select_skills(ctx)
+            selected = router.select_skills(ctx, max_count=compare_max)
             if not selected:
                 return []
 
             from src.agent.skills.skill_agent import SkillAgent
             agents = []
-            for skill_id in selected[:3]:  # cap at 3 concurrent skills
+            for skill_id in selected[:compare_max]:  # cap at config.agent_compare_max concurrent skills
                 agent = self._prepare_agent(SkillAgent(
                     skill_id=skill_id,
                     **common_kwargs,
