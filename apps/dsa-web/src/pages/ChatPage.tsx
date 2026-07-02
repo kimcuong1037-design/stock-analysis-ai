@@ -254,9 +254,20 @@ const ChatPage: React.FC = () => {
   }, [loadInitialSession]);
 
   useEffect(() => {
-    agentApi.getSkills()
-      .then((res) => {
+    Promise.all([
+      agentApi.getSkills(),
+      agentApi.getProfile().catch(() => ({ skillIds: [] as string[], source: null, updatedAt: null })),
+    ])
+      .then(([res, profile]) => {
         setSkills(res.skills);
+        const loadedSkillIds = new Set(res.skills.map((skill) => skill.id));
+        const profileSkillIds = profile.skillIds
+          .filter((id) => loadedSkillIds.has(id))
+          .slice(0, MAX_SELECTED_SKILLS);
+        if (profileSkillIds.length > 0) {
+          setSelectedSkillIds(profileSkillIds);
+          return;
+        }
         const defaultId =
           res.default_skill_id ||
           res.skills[0]?.id ||

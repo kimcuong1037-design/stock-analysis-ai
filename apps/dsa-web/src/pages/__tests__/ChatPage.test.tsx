@@ -19,6 +19,7 @@ function createDeferred<T>() {
 
 const {
   mockGetSkills,
+  mockGetProfile,
   mockDeleteChatSession,
   mockSendChat,
   mockGetSystemConfig,
@@ -30,6 +31,7 @@ const {
   mockFormatSessionAsMarkdown,
 } = vi.hoisted(() => ({
   mockGetSkills: vi.fn(),
+  mockGetProfile: vi.fn(),
   mockDeleteChatSession: vi.fn(),
   mockSendChat: vi.fn(),
   mockGetSystemConfig: vi.fn(),
@@ -74,6 +76,7 @@ const mockStoreState = {
 vi.mock('../../api/agent', () => ({
   agentApi: {
     getSkills: mockGetSkills,
+    getProfile: mockGetProfile,
     deleteChatSession: mockDeleteChatSession,
     sendChat: mockSendChat,
   },
@@ -166,6 +169,7 @@ beforeEach(() => {
     ],
     default_skill_id: 'bull_trend',
   });
+  mockGetProfile.mockResolvedValue({ skillIds: [], source: null, updatedAt: null });
   mockDeleteChatSession.mockResolvedValue(undefined);
   mockSendChat.mockResolvedValue({ success: true });
   mockGetWatchlist.mockResolvedValue([]);
@@ -397,6 +401,68 @@ describe('ChatPage', () => {
   });
 
   it('selects the default skill after loading skills', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('checkbox', { name: '趋势分析' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '通用分析' })).not.toBeChecked();
+  });
+
+  it('prefills the strategy selector from the saved investor profile', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
+        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+      ],
+      default_skill_id: 'bull_trend',
+    });
+    mockGetProfile.mockResolvedValue({ skillIds: ['chan_theory'], source: 'manual', updatedAt: null });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('checkbox', { name: '缠论' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '趋势分析' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '通用分析' })).not.toBeChecked();
+  });
+
+  it('trims the profile prefill to the selection cap and ignores unknown skill ids', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
+        { id: 'ma_golden_cross', name: '均线金叉', description: '均线交叉' },
+        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+        { id: 'wave_theory', name: '波浪理论', description: '波浪分析' },
+      ],
+      default_skill_id: 'bull_trend',
+    });
+    mockGetProfile.mockResolvedValue({
+      skillIds: ['bull_trend', 'ma_golden_cross', 'unknown_skill', 'chan_theory', 'wave_theory'],
+      source: 'manual',
+      updatedAt: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('checkbox', { name: '趋势分析' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '均线金叉' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '缠论' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '波浪理论' })).not.toBeChecked();
+  });
+
+  it('keeps the default skill selection when the saved profile has no strategies', async () => {
+    mockGetProfile.mockResolvedValue({ skillIds: [], source: null, updatedAt: null });
+
     render(
       <MemoryRouter initialEntries={['/chat']}>
         <ChatPage />
