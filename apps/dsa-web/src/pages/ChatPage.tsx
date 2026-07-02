@@ -10,6 +10,7 @@ import { getParsedApiError } from '../api/error';
 import type { SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
 import { SkillBreakdownTable } from '../components/chat/SkillBreakdownTable';
+import { SkillConsensusCard } from '../components/chat/SkillConsensusCard';
 import {
   useAgentChatStore,
   type Message,
@@ -1041,6 +1042,7 @@ const ChatPage: React.FC = () => {
                             {msg.content}
                           </Markdown>
                         </div>
+                        {msg.skillConsensus && <SkillConsensusCard consensus={msg.skillConsensus} />}
                         {msg.skillBreakdown && msg.skillBreakdown.length > 0 && (
                           <SkillBreakdownTable items={msg.skillBreakdown} />
                         )}

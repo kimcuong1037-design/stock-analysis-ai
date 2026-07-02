@@ -62,6 +62,7 @@ class ChatResponse(BaseModel):
     session_id: str
     error: Optional[str] = None
     skill_breakdown: List[Dict[str, Any]] = []
+    skill_consensus: Optional[Dict[str, Any]] = None
 
 class SkillInfo(BaseModel):
     id: str
@@ -339,6 +340,7 @@ async def agent_chat(request: ChatRequest):
             skill_breakdown=_enrich_breakdown_display_names(
                 config, getattr(result, "skill_breakdown", []) or []
             ),
+            skill_consensus=getattr(result, "skill_consensus", None),
         )
             
     except Exception as e:
@@ -582,6 +584,7 @@ async def agent_chat_stream(request: ChatRequest):
                     "skill_breakdown": _enrich_breakdown_display_names(
                         config, getattr(result, "skill_breakdown", []) or []
                     ),
+                    "skill_consensus": getattr(result, "skill_consensus", None),
                 }),
                 loop,
             )

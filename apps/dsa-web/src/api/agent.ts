@@ -26,12 +26,21 @@ export interface SkillBreakdownItem {
   key_levels: Record<string, unknown>;
 }
 
+export interface SkillConsensus {
+  signal: string;
+  confidence: number;
+  score_adjustment: number;
+  reasoning: string;
+  skill_count: number;
+}
+
 export interface ChatResponse {
   success: boolean;
   content: string;
   session_id: string;
   error?: string;
   skill_breakdown?: SkillBreakdownItem[];
+  skill_consensus?: SkillConsensus | null;
 }
 
 export interface SkillInfo {

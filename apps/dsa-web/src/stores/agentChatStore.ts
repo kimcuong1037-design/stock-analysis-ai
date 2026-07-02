@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { agentApi } from '../api/agent';
-import type { ChatSessionItem, ChatStreamRequest, SkillBreakdownItem } from '../api/agent';
+import type { ChatSessionItem, ChatStreamRequest, SkillBreakdownItem, SkillConsensus } from '../api/agent';
 import {
   getParsedApiError,
   isApiRequestError,
@@ -32,6 +32,7 @@ export interface Message {
   skillName?: string;
   thinkingSteps?: ProgressStep[];
   skillBreakdown?: SkillBreakdownItem[];
+  skillConsensus?: SkillConsensus;
 }
 
 export interface StreamMeta {
@@ -46,6 +47,7 @@ type StreamFailureEvent = {
   error?: unknown;
   message?: unknown;
   skill_breakdown?: SkillBreakdownItem[];
+  skill_consensus?: SkillConsensus | null;
 };
 
 function getFirstMeaningfulStreamError(...candidates: Array<unknown>): unknown {
@@ -272,6 +274,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
       let buf = '';
       let finalContent: string | null = null;
       let finalSkillBreakdown: SkillBreakdownItem[] = [];
+      let finalSkillConsensus: SkillConsensus | undefined;
       const currentProgressSteps: ProgressStep[] = [];
         const processLine = (line: string) => {
           if (!line.startsWith('data: ')) return;
@@ -284,6 +287,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
             }
             finalContent = doneEvent.content ?? '';
             finalSkillBreakdown = doneEvent.skill_breakdown ?? [];
+            finalSkillConsensus = doneEvent.skill_consensus ?? undefined;
             return;
           }
 
@@ -341,6 +345,7 @@ export const useAgentChatStore = create<AgentChatState & AgentChatActions>((set,
               skillName,
               thinkingSteps: [...currentProgressSteps],
               skillBreakdown: finalSkillBreakdown,
+              skillConsensus: finalSkillConsensus,
             },
           ],
         }));

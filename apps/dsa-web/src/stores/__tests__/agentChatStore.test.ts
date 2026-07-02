@@ -137,6 +137,52 @@ describe('agentChatStore.startStream', () => {
     expect(state.messages[1].skillBreakdown).toEqual(skillBreakdown);
   });
 
+  it('persists skillConsensus from the SSE done event onto the assistant message', async () => {
+    const skillConsensus = {
+      signal: 'hold',
+      confidence: 0.72,
+      score_adjustment: 4,
+      reasoning: '综合共识依据',
+      skill_count: 2,
+    };
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        `data: ${JSON.stringify({
+          type: 'done',
+          success: true,
+          content: '综合多策略分析结果',
+          skill_consensus: skillConsensus,
+        })}`,
+      ]),
+    );
+
+    await useAgentChatStore
+      .getState()
+      .startStream(
+        { message: '分析茅台', session_id: 'session-test', skills: ['bull_trend', 'box_oscillation'] },
+        { skillNames: ['牛市趋势', '箱体震荡'] },
+      );
+
+    const state = useAgentChatStore.getState();
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[1].skillConsensus).toEqual(skillConsensus);
+  });
+
+  it('leaves skillConsensus undefined when the SSE done event omits it', async () => {
+    vi.mocked(agentApi.chatStream).mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"done","success":true,"content":"单策略分析结果"}',
+      ]),
+    );
+
+    await useAgentChatStore
+      .getState()
+      .startStream({ message: '分析茅台', session_id: 'session-test' }, { skillName: '趋势技能' });
+
+    const state = useAgentChatStore.getState();
+    expect(state.messages[1].skillConsensus).toBeUndefined();
+  });
+
   it('preserves multiple selected skills on streamed user and assistant messages', async () => {
     vi.mocked(agentApi.chatStream).mockResolvedValue(
       createStreamResponse([

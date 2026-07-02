@@ -168,3 +168,209 @@ def test_orchestrator_chat_preserves_skill_breakdown():
 
     assert isinstance(result, AgentResult)
     assert result.skill_breakdown == breakdown
+
+
+# ---------------------------------------------------------------------------
+# Task 12: skill_consensus flow-through (additive, mirrors skill_breakdown)
+# ---------------------------------------------------------------------------
+
+_CONSENSUS = {
+    "signal": "hold",
+    "confidence": 0.72,
+    "score_adjustment": 4,
+    "reasoning": "weighted aggregate",
+    "skill_count": 2,
+}
+
+
+def test_chat_response_has_skill_consensus_field():
+    """ChatResponse must always carry skill_consensus (None when absent)."""
+    from api.v1.endpoints.agent import ChatResponse
+    assert "skill_consensus" in ChatResponse.model_fields
+
+
+def test_orchestrator_chat_preserves_skill_consensus():
+    """Regression: orchestrator.chat() must copy skill_consensus from the
+    pipeline result into the AgentResult it returns (same flow as
+    skill_breakdown), otherwise the API never sees it in multi-agent mode."""
+    from unittest.mock import MagicMock, patch
+
+    from src.agent.orchestrator import AgentOrchestrator, OrchestratorResult
+    from src.agent.executor import AgentResult
+    from src.agent.protocols import AgentContext
+
+    orch = AgentOrchestrator.__new__(AgentOrchestrator)
+    orch.config = MagicMock()
+    orch.llm_adapter = MagicMock()
+    orch._build_context = MagicMock(return_value=AgentContext())
+    orch._execute_pipeline = MagicMock(return_value=OrchestratorResult(
+        success=True, content="hello", skill_consensus=_CONSENSUS))
+
+    with patch("src.agent.orchestrator.build_visible_chat_history", return_value=[]), \
+            patch("src.agent.conversation.conversation_manager"):
+        result = orch.chat("q", "sess")
+
+    assert isinstance(result, AgentResult)
+    assert result.skill_consensus == _CONSENSUS
+
+
+def test_orchestrator_chat_skill_consensus_absent_is_none():
+    """When the pipeline produced no consensus (single-skill/no-skill run),
+    orchestrator.chat() must not fabricate one."""
+    from unittest.mock import MagicMock, patch
+
+    from src.agent.orchestrator import AgentOrchestrator, OrchestratorResult
+    from src.agent.executor import AgentResult
+    from src.agent.protocols import AgentContext
+
+    orch = AgentOrchestrator.__new__(AgentOrchestrator)
+    orch.config = MagicMock()
+    orch.llm_adapter = MagicMock()
+    orch._build_context = MagicMock(return_value=AgentContext())
+    orch._execute_pipeline = MagicMock(return_value=OrchestratorResult(success=True, content="hello"))
+
+    with patch("src.agent.orchestrator.build_visible_chat_history", return_value=[]), \
+            patch("src.agent.conversation.conversation_manager"):
+        result = orch.chat("q", "sess")
+
+    assert isinstance(result, AgentResult)
+    assert result.skill_consensus is None
+
+
+class _ImmediateLoop:
+    """Runs run_in_executor synchronously so sync agent_chat tests need no thread pool."""
+
+    def __init__(self, loop):
+        self._loop = loop
+
+    def run_in_executor(self, _executor, func):
+        future = self._loop.create_future()
+        future.set_result(func())
+        return future
+
+
+def test_agent_chat_sync_surfaces_skill_consensus():
+    """POST /chat surfaces the orchestrator's skill_consensus additively."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from api.v1.endpoints.agent import agent_chat, ChatRequest
+
+    breakdown = [{
+        "skill_id": "bull_trend", "display_name": "bull_trend", "signal": "buy",
+        "confidence": 0.8, "score_adjustment": 12, "reasoning": "x", "key_levels": {},
+    }]
+    executor = MagicMock()
+    executor.chat.return_value = SimpleNamespace(
+        success=True, content="ok", error=None,
+        skill_breakdown=breakdown, skill_consensus=_CONSENSUS,
+    )
+    config = SimpleNamespace(is_agent_available=lambda: True, agent_compare_max=3)
+    request = ChatRequest(message="hi", skills=["bull_trend", "box_oscillation"])
+    real_get_running_loop = asyncio.get_running_loop
+
+    with patch("api.v1.endpoints.agent.get_config", return_value=config), \
+            patch("api.v1.endpoints.agent._build_executor", return_value=executor), \
+            patch(
+                "api.v1.endpoints.agent.asyncio.get_running_loop",
+                side_effect=lambda: _ImmediateLoop(real_get_running_loop()),
+            ):
+        response = asyncio.run(agent_chat(request))
+
+    assert response.skill_consensus == _CONSENSUS
+
+
+def test_agent_chat_sync_skill_consensus_absent_when_none():
+    """Single-skill / no-skill chat: skill_consensus stays None — additive
+    field, never fabricated when the orchestrator didn't compute one."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from api.v1.endpoints.agent import agent_chat, ChatRequest
+
+    executor = MagicMock()
+    executor.chat.return_value = SimpleNamespace(success=True, content="ok", error=None)
+    config = SimpleNamespace(is_agent_available=lambda: True, agent_compare_max=3)
+    # Explicit empty skills list = "clear" (bypasses profile lookup / DB access).
+    request = ChatRequest(message="hi", skills=[])
+    real_get_running_loop = asyncio.get_running_loop
+
+    with patch("api.v1.endpoints.agent.get_config", return_value=config), \
+            patch("api.v1.endpoints.agent._build_executor", return_value=executor), \
+            patch(
+                "api.v1.endpoints.agent.asyncio.get_running_loop",
+                side_effect=lambda: _ImmediateLoop(real_get_running_loop()),
+            ):
+        response = asyncio.run(agent_chat(request))
+
+    assert response.skill_consensus is None
+
+
+async def _collect_sse_events(response) -> list:
+    import json as json_mod
+
+    events = []
+    async for chunk in response.body_iterator:
+        text = chunk if isinstance(chunk, str) else chunk.decode("utf-8")
+        for part in text.split("\n\n"):
+            part = part.strip()
+            if part.startswith("data: "):
+                events.append(json_mod.loads(part[len("data: "):]))
+    return events
+
+
+def test_agent_chat_stream_done_event_includes_skill_consensus():
+    """SSE 'done' event carries skill_consensus additively (mirrors skill_breakdown)."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from api.v1.endpoints.agent import agent_chat_stream, ChatRequest
+
+    executor = MagicMock()
+    executor.chat.return_value = SimpleNamespace(
+        success=True, content="ok", error=None, total_steps=3,
+        skill_breakdown=[], skill_consensus=_CONSENSUS,
+    )
+    config = SimpleNamespace(is_agent_available=lambda: True, agent_compare_max=3)
+    request = ChatRequest(
+        message="hi", skills=["bull_trend", "box_oscillation"], session_id="sse-consensus-test",
+    )
+
+    async def run():
+        with patch("api.v1.endpoints.agent.get_config", return_value=config), \
+                patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+            response = await agent_chat_stream(request)
+            return await _collect_sse_events(response)
+
+    events = asyncio.run(run())
+    done_events = [e for e in events if e.get("type") == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["skill_consensus"] == _CONSENSUS
+
+
+def test_agent_chat_stream_done_event_skill_consensus_absent_is_none():
+    """Single-skill / no-skill stream: SSE done.skill_consensus stays None."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from api.v1.endpoints.agent import agent_chat_stream, ChatRequest
+
+    executor = MagicMock()
+    executor.chat.return_value = SimpleNamespace(success=True, content="ok", error=None, total_steps=1)
+    config = SimpleNamespace(is_agent_available=lambda: True, agent_compare_max=3)
+    request = ChatRequest(message="hi", skills=[], session_id="sse-consensus-absent-test")
+
+    async def run():
+        with patch("api.v1.endpoints.agent.get_config", return_value=config), \
+                patch("api.v1.endpoints.agent._build_executor", return_value=executor):
+            response = await agent_chat_stream(request)
+            return await _collect_sse_events(response)
+
+    events = asyncio.run(run())
+    done_events = [e for e in events if e.get("type") == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["skill_consensus"] is None

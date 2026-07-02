@@ -459,6 +459,12 @@ const zh = {
   'skillBreakdown.signal.hold': '持有',
   'skillBreakdown.signal.sell': '卖出',
   'skillBreakdown.signal.strongSell': '强烈卖出',
+
+  'skillConsensus.title': '共识结论',
+  'skillConsensus.confidenceLabel': '置信度',
+  'skillConsensus.scoreAdjustmentLabel': '打分调整',
+  'skillConsensus.skillCountLabel': '基于 {count} 个策略',
+  'skillConsensus.reasoningLabel': '共识依据',
 } as const;
 
 export type UiTextKey = keyof typeof zh;
@@ -922,6 +928,12 @@ const en: Record<UiTextKey, string> = {
   'skillBreakdown.signal.hold': 'Hold',
   'skillBreakdown.signal.sell': 'Sell',
   'skillBreakdown.signal.strongSell': 'Strong Sell',
+
+  'skillConsensus.title': 'Consensus',
+  'skillConsensus.confidenceLabel': 'Confidence',
+  'skillConsensus.scoreAdjustmentLabel': 'Score Adj.',
+  'skillConsensus.skillCountLabel': 'Based on {count} strategies',
+  'skillConsensus.reasoningLabel': 'Consensus rationale',
 };
 
 export const UI_TEXT: Record<UiLanguage, Record<UiTextKey, string>> = {

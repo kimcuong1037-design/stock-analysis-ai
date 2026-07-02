@@ -400,6 +400,63 @@ describe('ChatPage', () => {
     expect(skillBadge).toHaveTextContent('趋势分析、均线金叉');
   });
 
+  it('renders the consensus card above the skill breakdown table when both are present', async () => {
+    mockStoreState.messages = [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '综合多策略分析结果',
+        skillBreakdown: [
+          {
+            skill_id: 'bull_trend',
+            display_name: '牛市趋势',
+            signal: 'buy',
+            confidence: 0.8,
+            score_adjustment: 12,
+            reasoning: '多头排列',
+            key_levels: {},
+          },
+        ],
+        skillConsensus: {
+          signal: 'hold',
+          confidence: 0.72,
+          score_adjustment: 4,
+          reasoning: '综合共识依据',
+          skill_count: 2,
+        },
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    const consensusHeading = await screen.findByText('共识结论');
+    const breakdownHeading = await screen.findByText('策略对比');
+
+    // consensus card must precede (be "above") the breakdown table in DOM order
+    expect(
+      consensusHeading.compareDocumentPosition(breakdownHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('does not render the consensus card when skillConsensus is absent', async () => {
+    mockStoreState.messages = [
+      { id: 'assistant-1', role: 'assistant', content: '普通分析结果' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    await screen.findByText('普通分析结果');
+    expect(screen.queryByText('共识结论')).not.toBeInTheDocument();
+  });
+
   it('selects the default skill after loading skills', async () => {
     render(
       <MemoryRouter initialEntries={['/chat']}>

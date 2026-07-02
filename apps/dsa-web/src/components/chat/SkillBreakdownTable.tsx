@@ -1,29 +1,11 @@
 import type React from 'react';
 import { Fragment, useState } from 'react';
 import type { SkillBreakdownItem } from '../../api/agent';
-import type { UiTextKey } from '../../i18n/uiText';
 import { useUiLanguage } from '../../contexts/UiLanguageContext';
 import { Badge } from '../common/Badge';
 import { JsonViewer } from '../common/JsonViewer';
 import { cn } from '../../utils/cn';
-
-type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>['variant']>;
-
-const SIGNAL_VARIANT: Record<string, BadgeVariant> = {
-  strong_buy: 'success',
-  buy: 'success',
-  hold: 'default',
-  sell: 'danger',
-  strong_sell: 'danger',
-};
-
-const SIGNAL_LABEL_KEY: Record<string, UiTextKey> = {
-  strong_buy: 'skillBreakdown.signal.strongBuy',
-  buy: 'skillBreakdown.signal.buy',
-  hold: 'skillBreakdown.signal.hold',
-  sell: 'skillBreakdown.signal.sell',
-  strong_sell: 'skillBreakdown.signal.strongSell',
-};
+import { SIGNAL_VARIANT, SIGNAL_LABEL_KEY } from './signalBadge';
 
 const hasKeyLevels = (levels: Record<string, unknown> | null | undefined): boolean =>
   !!levels && Object.keys(levels).length > 0;
