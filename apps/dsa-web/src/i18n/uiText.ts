@@ -52,6 +52,7 @@ const zh = {
   'layout.nav.chat': '问股',
   'layout.nav.home': '首页',
   'layout.nav.portfolio': '持仓',
+  'layout.nav.profile': '投资画像',
   'layout.nav.settings': '设置',
   'layout.nav.screening': '选股',
   'layout.navMenu': '导航菜单',
@@ -67,6 +68,8 @@ const zh = {
   'layout.route.home.title': '首页',
   'layout.route.portfolio.description': '组合快照、手工录入与风险分析',
   'layout.route.portfolio.title': '持仓',
+  'layout.route.profile.description': '通过访谈或直接选择获取你的策略偏好画像',
+  'layout.route.profile.title': '投资画像',
   'layout.route.settings.description': '系统配置、模型与认证管理',
   'layout.route.settings.title': '设置',
   'layout.route.screening.description': 'AlphaSift 策略选股与候选研究',
@@ -432,6 +435,17 @@ const zh = {
   'interviewWizard.adopt': '采用',
   'interviewWizard.redo': '重答',
   'interviewWizard.skip': '跳过',
+
+  'profilePage.title': '投资画像',
+  'profilePage.description': '通过访谈问答或直接选择策略，构建你的投资偏好画像，用于智能问股与选股推荐。',
+  'profilePage.tab.interview': '做个访谈',
+  'profilePage.tab.manual': '直接选策略',
+  'profilePage.loadError': '画像加载失败，请刷新重试。',
+  'profilePage.save': '保存画像',
+  'profilePage.saving': '保存中...',
+  'profilePage.saveSuccess': '画像已保存',
+  'profilePage.saveError': '保存失败，请重试',
+  'profilePage.manualEmptyHint': '请至少选择一个策略后再保存。',
 } as const;
 
 export type UiTextKey = keyof typeof zh;
@@ -488,6 +502,7 @@ const en: Record<UiTextKey, string> = {
   'layout.nav.chat': 'Ask',
   'layout.nav.home': 'Home',
   'layout.nav.portfolio': 'Portfolio',
+  'layout.nav.profile': 'Investor Profile',
   'layout.nav.settings': 'Settings',
   'layout.nav.screening': 'Screening',
   'layout.navMenu': 'Navigation',
@@ -503,6 +518,8 @@ const en: Record<UiTextKey, string> = {
   'layout.route.home.title': 'Home',
   'layout.route.portfolio.description': 'Portfolio snapshots, manual entries, and risk analysis',
   'layout.route.portfolio.title': 'Portfolio',
+  'layout.route.profile.description': 'Get your strategy preference profile via interview or direct selection',
+  'layout.route.profile.title': 'Investor Profile',
   'layout.route.settings.description': 'System config, models, and authentication',
   'layout.route.settings.title': 'Settings',
   'layout.route.screening.description': 'AlphaSift strategy screening and candidate research',
@@ -868,6 +885,17 @@ const en: Record<UiTextKey, string> = {
   'interviewWizard.adopt': 'Adopt',
   'interviewWizard.redo': 'Redo',
   'interviewWizard.skip': 'Skip',
+
+  'profilePage.title': 'Investor Profile',
+  'profilePage.description': 'Build your strategy preference profile via a quick interview or by picking strategies directly, used for smart Ask and screening recommendations.',
+  'profilePage.tab.interview': 'Take the interview',
+  'profilePage.tab.manual': 'Pick strategies directly',
+  'profilePage.loadError': 'Failed to load profile, please refresh and retry.',
+  'profilePage.save': 'Save profile',
+  'profilePage.saving': 'Saving...',
+  'profilePage.saveSuccess': 'Profile saved',
+  'profilePage.saveError': 'Save failed, please retry',
+  'profilePage.manualEmptyHint': 'Select at least one strategy before saving.',
 };
 
 export const UI_TEXT: Record<UiLanguage, Record<UiTextKey, string>> = {
