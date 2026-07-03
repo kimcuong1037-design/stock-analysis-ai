@@ -76,8 +76,21 @@ class SkillsResponse(BaseModel):
     default_skill_id: str = ""
 
 
+class LegacyStrategyInfo(BaseModel):
+    """Frozen legacy shape for the deprecated ``/strategies`` alias.
+
+    Intentionally excludes fields added later to ``SkillInfo`` (e.g.
+    ``category``, ``profile_tags``) so pre-existing legacy clients keep
+    receiving exactly the payload they were pinned to.
+    """
+
+    id: str
+    name: str
+    description: str
+
+
 class StrategiesResponse(BaseModel):
-    strategies: List[SkillInfo]
+    strategies: List[LegacyStrategyInfo]
     default_strategy_id: str = ""
 
 
@@ -178,7 +191,10 @@ async def get_strategies():
     """Compatibility alias for legacy clients."""
     payload = _build_skills_response(get_config())
     return StrategiesResponse(
-        strategies=payload.skills,
+        strategies=[
+            LegacyStrategyInfo(id=s.id, name=s.name, description=s.description)
+            for s in payload.skills
+        ],
         default_strategy_id=payload.default_skill_id,
     )
 
