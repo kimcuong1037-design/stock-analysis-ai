@@ -271,7 +271,11 @@ async def post_interview(request: InterviewRequest):
         _skill_to_info(s)
         for s in (by_id[i] for i in rec_ids if i in by_id)
     ]
-    explanation = _build_interview_explanation(config, request.answers, recommended)
+    # Offload the (possibly LLM-backed) explanation call to a thread so a slow
+    # provider doesn't block the event loop for up to `timeout=20`s.
+    explanation = await asyncio.to_thread(
+        _build_interview_explanation, config, request.answers, recommended
+    )
     return InterviewResponse(recommended=recommended, explanation=explanation)
 
 
