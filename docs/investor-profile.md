@@ -65,7 +65,7 @@ Web 路由 `/profile`（`apps/dsa-web/src/pages/ProfilePage.tsx`，导航项 `la
 - 请求**未传** `skills` 字段（`None`）时，服务端读取已保存投资画像的 `skill_ids` 作为回退；画像不存在或为空时保持默认行为。
 - 解析出的非空技能列表最终按 `max(1, config.agent_compare_max)` 截断。
 
-Web 端 `ChatPage.tsx` 首次加载会用 `GET /api/v1/agent/profile` 预填策略选择框（过滤掉已下线的技能 id，并截断至前端自身的 `MAX_SELECTED_SKILLS=3`，与后端 `AGENT_COMPARE_MAX` 是两个独立常量，见「已知限制」）；发送消息时只有选中列表非空才会附带 `skills` 字段，否则省略该字段（此时会被服务端画像回退接管）。
+Web 端 `ChatPage.tsx` 首次加载会用 `GET /api/v1/agent/profile` 预填策略选择框（过滤掉已下线的技能 id，并截断至前端自身的 `MAX_SELECTED_SKILLS=3`，与后端 `AGENT_COMPARE_MAX` 是两个独立常量，见「已知限制」），同时记录是否存在已保存画像（`hasProfile`）。发送消息时：选中列表非空则附带 `skills` 字段；选中列表为空时，若存在已保存画像则显式发送 `skills: []`（对应后端「显式清空」语义，不会被画像回退接管），若不存在已保存画像则省略该字段（走服务端默认路由，不涉及画像回退）。
 
 ### 配置：`AGENT_COMPARE_MAX`
 
@@ -139,7 +139,6 @@ AGENT_ORCHESTRATOR_MODE=specialist
 ## 已知限制
 
 - **Web 问股策略选择框的上限是前端独立常量**：`ChatPage.tsx` 的 `MAX_SELECTED_SKILLS=3` 是硬编码的前端限制，与后端 `AGENT_COMPARE_MAX` 配置无关联；调高 `AGENT_COMPARE_MAX` 不会让问股页允许勾选超过 3 个策略（画像页 `StrategyCenter` 的上限 5 与此无关，二者是不同页面的独立限制）。
-- **「通用分析」与未选择策略在请求层面等价**：`ChatPage.tsx` 只有选中策略非空时才在请求体中附带 `skills` 字段；显式勾选「通用分析」（清空选择）与从未选择过策略一样都不发送该字段，因此都会被服务端的画像回退接管——如果用户已保存投资画像，即使在问股页显式选择「通用分析」，实际请求仍可能带上画像中的策略。
 
 ## 相关文件
 

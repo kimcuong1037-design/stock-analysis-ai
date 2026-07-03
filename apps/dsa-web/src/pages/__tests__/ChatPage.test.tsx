@@ -592,6 +592,44 @@ describe('ChatPage', () => {
     }));
   });
 
+  it('sends an explicit empty skills list when a saved profile exists and the user deselects all strategies', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
+        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+      ],
+      default_skill_id: 'bull_trend',
+    });
+    mockGetProfile.mockResolvedValue({ skillIds: ['chan_theory'], source: 'manual', updatedAt: null });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    // Profile prefill selects 缠论; deselecting it reaches 通用分析 (explicit clear).
+    const chanCheckbox = await screen.findByRole('checkbox', { name: '缠论' });
+    expect(chanCheckbox).toBeChecked();
+    fireEvent.click(chanCheckbox);
+    expect(screen.getByRole('checkbox', { name: '通用分析' })).toBeChecked();
+
+    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
+      target: { value: '分析 AAPL' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalled();
+    });
+    const lastCall = mockStartStream.mock.calls[mockStartStream.mock.calls.length - 1];
+    expect(lastCall[0]).toEqual(expect.objectContaining({ message: '分析 AAPL', skills: [] }));
+    expect(lastCall[1]).toEqual(expect.objectContaining({
+      skillNames: ['通用'],
+      skillName: '通用',
+    }));
+  });
+
   it('caps concrete skill selection at three and re-enables choices after unselecting', async () => {
     mockGetSkills.mockResolvedValue({
       skills: [
