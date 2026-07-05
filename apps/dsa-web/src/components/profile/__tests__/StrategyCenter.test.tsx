@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { StrategyCenter } from '../StrategyCenter';
 
@@ -92,7 +92,11 @@ describe('StrategyCenter', () => {
 
   it('groups value-category skills under the 价值 heading', async () => {
     render(<StrategyCenter selected={[]} onChange={() => {}} maxSelected={3} />);
-    expect(await screen.findByText('价值')).toBeInTheDocument();
-    expect(screen.getByText('价值低估')).toBeInTheDocument();
+    const heading = await screen.findByText('价值');
+    // Each category renders exactly one <section aria-label={label}> wrapping its heading and cards.
+    const section = heading.closest('section');
+    expect(section).not.toBeNull();
+    // Assert the skill card is nested inside the 价值 section, not merely rendered elsewhere.
+    expect(within(section as HTMLElement).getByText('价值低估')).toBeInTheDocument();
   });
 });
