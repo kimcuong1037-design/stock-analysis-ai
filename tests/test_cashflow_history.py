@@ -2,13 +2,14 @@
 """Offline tests for yearly cash-flow history extraction (valuation data layer)."""
 import os
 import sys
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pandas as pd
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from data_provider.fundamental_adapter import AkshareFundamentalAdapter, _em_symbol, _report_year
+from data_provider.base import DataFetcherManager
 
 
 def test_em_symbol_prefixes():
@@ -110,8 +111,6 @@ def test_akshare_cashflow_history_caps_years():
     assert records[0]["year"] == 2025
 
 
-from unittest.mock import MagicMock
-
 from data_provider.yfinance_fundamental_adapter import YfinanceFundamentalAdapter
 
 
@@ -172,3 +171,31 @@ def test_yfinance_cashflow_history_fail_open_on_ticker_error():
 def test_yfinance_cashflow_history_empty_symbol():
     adapter = YfinanceFundamentalAdapter()
     assert adapter.get_cashflow_history("") == []
+
+
+def _manager_with_stub_adapters():
+    manager = DataFetcherManager.__new__(DataFetcherManager)  # skip heavy __init__
+    manager._fundamental_adapter = MagicMock()
+    manager._yfinance_fundamental_adapter = MagicMock()
+    manager._fundamental_adapter.get_cashflow_history.return_value = [{"year": 2025, "ocf": 1.0}]
+    manager._yfinance_fundamental_adapter.get_cashflow_history.return_value = [{"year": 2025, "ocf": 2.0}]
+    return manager
+
+
+def test_manager_routes_cn_to_akshare_adapter():
+    manager = _manager_with_stub_adapters()
+    records = manager.get_cashflow_history("600519")
+    assert records[0]["ocf"] == 1.0
+    manager._fundamental_adapter.get_cashflow_history.assert_called_once()
+
+
+def test_manager_routes_hk_us_to_yfinance_adapter():
+    manager = _manager_with_stub_adapters()
+    assert manager.get_cashflow_history("AAPL")[0]["ocf"] == 2.0
+    assert manager.get_cashflow_history("hk00700")[0]["ocf"] == 2.0
+
+
+def test_manager_cashflow_history_fail_open():
+    manager = _manager_with_stub_adapters()
+    manager._fundamental_adapter.get_cashflow_history.side_effect = RuntimeError("boom")
+    assert manager.get_cashflow_history("600519") == []

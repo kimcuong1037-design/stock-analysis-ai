@@ -2989,6 +2989,23 @@ class DataFetcherManager:
             self._prune_fundamental_cache(cache_ttl, cache_max_entries)
         return result_ctx
 
+    def get_cashflow_history(self, stock_code: str, max_years: int = 10) -> List[Dict[str, Any]]:
+        """Yearly cash-flow history for intrinsic-value estimation.
+
+        Routes CN codes to akshare and HK/US codes to yfinance. Fail-open:
+        returns [] on any failure so valuation degrades instead of breaking
+        the analysis flow.
+        """
+        try:
+            code = normalize_stock_code(stock_code)
+            market = _market_tag(code)
+            if market in {"us", "hk"}:
+                return self._yfinance_fundamental_adapter.get_cashflow_history(code, max_years=max_years)
+            return self._fundamental_adapter.get_cashflow_history(code, max_years=max_years)
+        except Exception as exc:
+            logger.warning("get_cashflow_history failed for %s: %s", stock_code, exc)
+            return []
+
     def get_capital_flow_context(self, stock_code: str, budget_seconds: Optional[float] = None) -> Dict[str, Any]:
         """资金流向块（fail-open）。"""
         from src.config import get_config
