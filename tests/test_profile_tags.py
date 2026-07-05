@@ -26,3 +26,11 @@ def test_derived_from_market_regimes_theme():
     s = _skill(category="trend", market_regimes=["sector_hot"])
     tags = resolve_profile_tags(s)
     assert "theme" in tags["style"]
+
+
+def test_value_category_derives_value_style():
+    s = _skill(category="value")
+    tags = resolve_profile_tags(s)
+    assert tags["style"] == ["value"]
+    assert tags["horizon"] == ["long"]
+    assert set(tags["risk"]) == {"conservative", "balanced"}
