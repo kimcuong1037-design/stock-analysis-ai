@@ -108,3 +108,67 @@ def test_akshare_cashflow_history_caps_years():
         records = adapter.get_cashflow_history("600519", max_years=10)
     assert len(records) == 10
     assert records[0]["year"] == 2025
+
+
+from unittest.mock import MagicMock
+
+from data_provider.yfinance_fundamental_adapter import YfinanceFundamentalAdapter
+
+
+def _yf_annual_cashflow():
+    cols = [pd.Timestamp("2025-09-30"), pd.Timestamp("2024-09-30"),
+            pd.Timestamp("2023-09-30"), pd.Timestamp("2022-09-30")]
+    return pd.DataFrame(
+        [[120e9, 110e9, 105e9, 100e9], [-11e9, -10e9, -10e9, -9e9]],
+        index=["Operating Cash Flow", "Capital Expenditure"],
+        columns=cols,
+    )
+
+
+def _yf_annual_income():
+    cols = [pd.Timestamp("2025-09-30"), pd.Timestamp("2024-09-30")]
+    return pd.DataFrame(
+        [[400e9, 380e9], [95e9, 90e9]],
+        index=["Total Revenue", "Net Income"],
+        columns=cols,
+    )
+
+
+def _mock_yf_ticker():
+    ticker = MagicMock()
+    ticker.cashflow = _yf_annual_cashflow()
+    ticker.income_stmt = _yf_annual_income()
+    ticker.get_info.return_value = {"financialCurrency": "USD"}
+    ticker.info = {"financialCurrency": "USD"}
+    return ticker
+
+
+def test_yfinance_cashflow_history_annual_records():
+    adapter = YfinanceFundamentalAdapter()
+    fake_yf = MagicMock()
+    fake_yf.Ticker.return_value = _mock_yf_ticker()
+    with patch.dict(sys.modules, {"yfinance": fake_yf}):
+        records = adapter.get_cashflow_history("AAPL")
+
+    assert [r["year"] for r in records] == [2025, 2024, 2023, 2022]
+    assert records[0]["ocf"] == 120e9
+    assert records[0]["capex"] == -11e9  # raw sign preserved; engine uses abs()
+    assert records[0]["revenue"] == 400e9
+    assert records[0]["net_profit"] == 95e9
+    assert records[2]["revenue"] is None
+    assert records[0]["currency"] == "USD"
+
+
+def test_yfinance_cashflow_history_fail_open_on_ticker_error():
+    adapter = YfinanceFundamentalAdapter()
+    broken = MagicMock()
+    type(broken).cashflow = property(lambda self: (_ for _ in ()).throw(RuntimeError("boom")))
+    fake_yf = MagicMock()
+    fake_yf.Ticker.return_value = broken
+    with patch.dict(sys.modules, {"yfinance": fake_yf}):
+        assert adapter.get_cashflow_history("AAPL") == []
+
+
+def test_yfinance_cashflow_history_empty_symbol():
+    adapter = YfinanceFundamentalAdapter()
+    assert adapter.get_cashflow_history("") == []

@@ -28,6 +28,7 @@ mark the block as ``partial`` when only some fields are populated.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -48,6 +49,14 @@ _CASHFLOW_OP_KEYS = (
     "Cash Flow From Continuing Operating Activities",
     "Total Cash From Operating Activities",
 )
+_CF_HIST_OP_KEYS = (
+    "Operating Cash Flow",
+    "Total Cash From Operating Activities",
+    "Cash Flow From Continuing Operating Activities",
+)
+_CF_HIST_CAPEX_KEYS = ("Capital Expenditure", "Capital Expenditures")
+_IS_HIST_REVENUE_KEYS = ("Total Revenue", "Operating Revenue")
+_IS_HIST_NET_INCOME_KEYS = ("Net Income", "Net Income Common Stockholders")
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -366,3 +375,61 @@ class YfinanceFundamentalAdapter:
         )
         result["status"] = "partial" if has_content else "not_supported"
         return result
+
+    def get_cashflow_history(self, stock_code: str, max_years: int = 10) -> List[Dict[str, Any]]:
+        """Yearly (annual) cash-flow history via yfinance. Fail-open: []."""
+        try:
+            import yfinance as yf
+        except Exception:
+            return []
+        symbol = _convert_to_yf_symbol(stock_code)
+        if not symbol:
+            return []
+        ticker = yf.Ticker(symbol)
+        try:
+            cashflow_df = ticker.cashflow
+        except Exception:
+            return []
+        if cashflow_df is None or getattr(cashflow_df, "empty", True):
+            return []
+
+        try:
+            income_df = ticker.income_stmt
+        except Exception:
+            income_df = None
+        if income_df is not None and getattr(income_df, "empty", True):
+            income_df = None
+
+        currency = ""
+        try:
+            info = ticker.get_info() if hasattr(ticker, "get_info") else (ticker.info or {})
+            if isinstance(info, dict):
+                currency = str(info.get("financialCurrency") or info.get("currency") or "")
+        except Exception:
+            currency = ""
+
+        ocf_row = _pick_row(cashflow_df, _CF_HIST_OP_KEYS)
+        capex_row = _pick_row(cashflow_df, _CF_HIST_CAPEX_KEYS)
+        revenue_row = _pick_row(income_df, _IS_HIST_REVENUE_KEYS) if income_df is not None else None
+        ni_row = _pick_row(income_df, _IS_HIST_NET_INCOME_KEYS) if income_df is not None else None
+
+        records: List[Dict[str, Any]] = []
+        for col in cashflow_df.columns:
+            year = getattr(col, "year", None)
+            if year is None:
+                match = re.search(r"(19|20)\d{2}", str(col))
+                year = int(match.group(0)) if match else None
+            ocf = _safe_float(ocf_row.get(col)) if ocf_row is not None else None
+            if year is None or ocf is None:
+                continue
+            records.append({
+                "year": int(year),
+                "ocf": ocf,
+                "capex": _safe_float(capex_row.get(col)) if capex_row is not None else None,
+                "revenue": _safe_float(revenue_row.get(col)) if revenue_row is not None else None,
+                "net_profit": _safe_float(ni_row.get(col)) if ni_row is not None else None,
+                "currency": currency,
+                "source": "yfinance",
+            })
+        records.sort(key=lambda r: r["year"], reverse=True)
+        return records[:max_years]
