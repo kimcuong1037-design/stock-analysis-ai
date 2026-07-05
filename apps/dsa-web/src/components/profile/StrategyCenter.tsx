@@ -7,7 +7,7 @@ import { EmptyState, InlineAlert, Loading } from '../common';
 import { cn } from '../../utils/cn';
 
 // Category display order
-const CATEGORY_ORDER = ['trend', 'pattern', 'reversal', 'framework'] as const;
+const CATEGORY_ORDER = ['trend', 'pattern', 'reversal', 'framework', 'value'] as const;
 type KnownCategory = (typeof CATEGORY_ORDER)[number];
 
 const CATEGORY_I18N_KEY = {
@@ -15,6 +15,7 @@ const CATEGORY_I18N_KEY = {
   pattern: 'strategyCenter.category.pattern',
   reversal: 'strategyCenter.category.reversal',
   framework: 'strategyCenter.category.framework',
+  value: 'strategyCenter.category.value',
   other: 'strategyCenter.category.other',
 } as const satisfies Record<KnownCategory | 'other', string>;
 
