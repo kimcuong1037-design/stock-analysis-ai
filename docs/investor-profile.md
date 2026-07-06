@@ -34,9 +34,9 @@ Web 路由 `/profile`（`apps/dsa-web/src/pages/ProfilePage.tsx`，导航项 `la
 
 `apps/dsa-web/src/components/profile/StrategyCenter.tsx` 调用 `GET /api/v1/agent/skills`，按 `category` 分组展示（仅返回 `user_invocable=true` 的策略），固定分组顺序为：
 
-`trend`（趋势）→ `pattern`（形态）→ `reversal`（反转）→ `framework`（框架）→ 其余未知分类归入 `other`（其他）。
+`trend`（趋势）→ `pattern`（形态）→ `reversal`（反转）→ `framework`（框架）→ `value`（价值）→ 其余未知分类归入 `other`（其他）。
 
-`category` 及 `profile_tags` 的解析逻辑见 `src/agent/skills/profile_tags.py::resolve_profile_tags`：策略若显式声明 `profile_tags` 则直接使用；否则按 `category` 派生默认标签（`trend`→style=trend, `pattern`→style=framework, `reversal`→style=reversal/risk=aggressive, `framework`→style=framework/horizon=[swing,long]），并在 `market_regimes` 命中热点题材类关键词（`sector_hot`/`theme`/`hot_theme`/`emotion`/`event`）时追加 `style=theme`、`risk=aggressive`、`horizon=ultra_short`。
+`category` 及 `profile_tags` 的解析逻辑见 `src/agent/skills/profile_tags.py::resolve_profile_tags`：策略若显式声明 `profile_tags` 则直接使用；否则按 `category` 派生默认标签（`trend`→style=trend, `pattern`→style=framework, `reversal`→style=reversal/risk=aggressive, `framework`→style=framework/horizon=[swing,long], `value`→style=value/horizon=[long]/risk=[conservative,balanced]），并在 `market_regimes` 命中热点题材类关键词（`sector_hot`/`theme`/`hot_theme`/`emotion`/`event`）时追加 `style=theme`、`risk=aggressive`、`horizon=ultra_short`。目前内置策略中 `value_undervalued`（分类 `value`）与 `growth_quality`（分类 `framework`，显式声明 `profile_tags: {style: [value, framework], horizon: [long, swing], risk: [balanced]}`）都会命中访谈 `style=value`（价值低估）选项；两者的最终排序仍由各维度打分与 `default_priority`（`value_undervalued=50` 先于 `growth_quality=55`）共同决定，具体名次随 `horizon`/`risk` 答案组合变化（例如 `horizon=long, risk=balanced` 时两者得分打平，`value_undervalued` 按 `default_priority` 更靠前）。
 
 用户最多勾选 **5 个**策略（`ProfilePage.tsx` 的 `MAX_SELECTED_SKILLS=5`），达到上限后未选中的卡片禁用；点击「保存画像」调用 `PUT /api/v1/agent/profile`（`source=manual`）。
 

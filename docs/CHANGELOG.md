@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 问股默认策略可来自已保存的投资画像
 - [新功能] 新增配置 AGENT_COMPARE_MAX 控制单次对比策略数（默认 3）
 - [修复] 问股页存在已保存投资画像时，显式选择「通用分析」（清空策略）现在会正确清空生效策略，不再被服务端画像回退接管
+- [新功能] 新增"价值低估"策略：基于多年自由现金流的确定性 DCF 估值工具 estimate_intrinsic_value + 安全边际判定，覆盖 A 股/港股/美股（数据不足时明确降级）
+- [修复] 修复投资画像访谈"价值低估"风格选项无策略命中的断点：value 分类推导 + value_undervalued/growth_quality 显式 profile_tags + 策略中心"价值"分组
 
 ## [3.21.0] - 2026-06-07
 
