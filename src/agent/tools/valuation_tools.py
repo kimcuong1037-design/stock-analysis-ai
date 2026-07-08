@@ -30,8 +30,18 @@ def _handle_estimate_intrinsic_value(stock_code: str) -> dict:
     except Exception as exc:
         logger.info("estimate_intrinsic_value quote unavailable for %s: %s", stock_code, exc)
 
-    result = _estimate(records, market_cap=market_cap)
+    try:
+        result = _estimate(records, market_cap=market_cap)
+    except Exception as exc:
+        logger.warning("estimate_intrinsic_value estimate failed for %s: %s", stock_code, exc)
+        return {"status": "error", "error": f"estimate:{exc}", "stock_code": stock_code}
+
     result["stock_code"] = stock_code
+    # Reporting currency of the FCF records (financialCurrency), always surfaced
+    # so the LLM can caveat HK/US verdicts even when `valuation` is empty —
+    # market_cap (trading currency) and this can differ ~8-10% for HK-listed
+    # mainland companies. See strategies/value_undervalued.yaml step 4.
+    result["currency"] = records[0].get("currency", "") if records else ""
     return result
 
 

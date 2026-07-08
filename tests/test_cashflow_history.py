@@ -93,6 +93,22 @@ def test_akshare_cashflow_history_fail_open():
         assert adapter.get_cashflow_history("600519") == []
 
 
+def test_akshare_cashflow_history_fail_open_on_internal_parse_error():
+    """Fail-open must hold even when parsing the fetched DataFrame raises,
+    not just when _call_df_candidates itself fails."""
+    adapter = AkshareFundamentalAdapter()
+    df = _em_cashflow_df()
+
+    def fake_call(candidates):
+        if candidates[0][0] == "stock_cash_flow_sheet_by_yearly_em":
+            return df, "stock_cash_flow_sheet_by_yearly_em", []
+        return None, None, []
+
+    with patch.object(adapter, "_call_df_candidates", side_effect=fake_call), \
+            patch("data_provider.fundamental_adapter._report_year", side_effect=RuntimeError("boom")):
+        assert adapter.get_cashflow_history("600519") == []
+
+
 def test_akshare_cashflow_history_caps_years():
     adapter = AkshareFundamentalAdapter()
     df = pd.DataFrame({

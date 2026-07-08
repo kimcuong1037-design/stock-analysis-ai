@@ -60,6 +60,49 @@ def test_handler_history_failure_returns_error_status():
     assert "boom" in result["error"]
 
 
+def test_handler_result_includes_reporting_currency():
+    manager = MagicMock()
+    records = _records()
+    for r in records:
+        r["currency"] = "CNY"
+    manager.get_cashflow_history.return_value = records
+    quote = MagicMock()
+    quote.total_mv = 500e8
+    manager.get_realtime_quote.return_value = quote
+
+    with patch("src.agent.tools.valuation_tools._get_fetcher_manager", return_value=manager):
+        result = _handle_estimate_intrinsic_value("600519")
+
+    assert result["currency"] == "CNY"
+
+
+def test_handler_result_currency_empty_when_no_records():
+    manager = MagicMock()
+    manager.get_cashflow_history.return_value = []
+    manager.get_realtime_quote.return_value = None
+
+    with patch("src.agent.tools.valuation_tools._get_fetcher_manager", return_value=manager):
+        result = _handle_estimate_intrinsic_value("600519")
+
+    assert result["currency"] == ""
+
+
+def test_handler_estimate_failure_degrades_to_error_status():
+    manager = MagicMock()
+    manager.get_cashflow_history.return_value = _records()
+    quote = MagicMock()
+    quote.total_mv = 500e8
+    manager.get_realtime_quote.return_value = quote
+
+    with patch("src.agent.tools.valuation_tools._get_fetcher_manager", return_value=manager), \
+            patch("src.agent.tools.valuation_tools._estimate", side_effect=RuntimeError("estimate boom")):
+        result = _handle_estimate_intrinsic_value("600519")
+
+    assert result["status"] == "error"
+    assert "estimate boom" in result["error"]
+    assert result["stock_code"] == "600519"
+
+
 def test_tool_registered_in_factory_registry():
     from src.agent import factory
 

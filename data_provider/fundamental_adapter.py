@@ -561,42 +561,46 @@ class AkshareFundamentalAdapter:
 
     def get_cashflow_history(self, stock_code: str, max_years: int = 10) -> List[Dict[str, Any]]:
         """Yearly cash-flow history for valuation. Fail-open: [] on any failure."""
-        symbol = _em_symbol(stock_code)
-        cash_df, cash_source, _cash_errors = self._call_df_candidates([
-            ("stock_cash_flow_sheet_by_yearly_em", {"symbol": symbol}),
-        ])
-        if cash_df is None or cash_df.empty:
-            return []
+        try:
+            symbol = _em_symbol(stock_code)
+            cash_df, cash_source, _cash_errors = self._call_df_candidates([
+                ("stock_cash_flow_sheet_by_yearly_em", {"symbol": symbol}),
+            ])
+            if cash_df is None or cash_df.empty:
+                return []
 
-        profit_by_year: Dict[int, Dict[str, Any]] = {}
-        profit_df, _, _ = self._call_df_candidates([
-            ("stock_profit_sheet_by_yearly_em", {"symbol": symbol}),
-        ])
-        if profit_df is not None and not profit_df.empty:
-            for _, row in profit_df.iterrows():
+            profit_by_year: Dict[int, Dict[str, Any]] = {}
+            profit_df, _, _ = self._call_df_candidates([
+                ("stock_profit_sheet_by_yearly_em", {"symbol": symbol}),
+            ])
+            if profit_df is not None and not profit_df.empty:
+                for _, row in profit_df.iterrows():
+                    year = _report_year(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["report_date"]))
+                    if year is None:
+                        continue
+                    profit_by_year[year] = {
+                        "revenue": _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["revenue"])),
+                        "net_profit": _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["net_profit"])),
+                    }
+
+            records: List[Dict[str, Any]] = []
+            for _, row in cash_df.iterrows():
                 year = _report_year(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["report_date"]))
-                if year is None:
+                ocf = _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["ocf"]))
+                if year is None or ocf is None:
                     continue
-                profit_by_year[year] = {
-                    "revenue": _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["revenue"])),
-                    "net_profit": _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["net_profit"])),
-                }
-
-        records: List[Dict[str, Any]] = []
-        for _, row in cash_df.iterrows():
-            year = _report_year(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["report_date"]))
-            ocf = _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["ocf"]))
-            if year is None or ocf is None:
-                continue
-            extra = profit_by_year.get(year, {})
-            records.append({
-                "year": year,
-                "ocf": ocf,
-                "capex": _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["capex"])),
-                "revenue": extra.get("revenue"),
-                "net_profit": extra.get("net_profit"),
-                "currency": "CNY",
-                "source": cash_source or "akshare",
-            })
-        records.sort(key=lambda r: r["year"], reverse=True)
-        return records[:max_years]
+                extra = profit_by_year.get(year, {})
+                records.append({
+                    "year": year,
+                    "ocf": ocf,
+                    "capex": _safe_float(_pick_by_keywords(row, _CASHFLOW_HISTORY_KEYWORDS["capex"])),
+                    "revenue": extra.get("revenue"),
+                    "net_profit": extra.get("net_profit"),
+                    "currency": "CNY",
+                    "source": cash_source or "akshare",
+                })
+            records.sort(key=lambda r: r["year"], reverse=True)
+            return records[:max_years]
+        except Exception as exc:
+            logger.warning("akshare get_cashflow_history failed for %s: %s", stock_code, exc)
+            return []

@@ -35,3 +35,8 @@ def test_skill_instructions_mandate_tool_call():
     skill = _skill()
     assert "estimate_intrinsic_value" in skill.instructions
     assert "安全边际" in skill.instructions
+
+
+def test_skill_instructions_caveat_reporting_currency_mismatch():
+    skill = _skill()
+    assert "币种" in skill.instructions
