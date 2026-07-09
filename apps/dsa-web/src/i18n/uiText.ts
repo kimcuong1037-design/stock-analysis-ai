@@ -432,7 +432,9 @@ const zh = {
   'interviewWizard.loading': '分析中，请稍候...',
   'interviewWizard.error': '推荐获取失败，请重试',
   'interviewWizard.resultTitle': '为你推荐的策略',
+  'interviewWizard.resultHint': '点击卡片可调整要采用的策略，至少保留一个。',
   'interviewWizard.adopt': '采用',
+  'interviewWizard.saving': '保存中...',
   'interviewWizard.redo': '重答',
   'interviewWizard.skip': '跳过',
 
@@ -521,7 +523,7 @@ const en: Record<UiTextKey, string> = {
   'layout.nav.chat': 'Ask',
   'layout.nav.home': 'Home',
   'layout.nav.portfolio': 'Portfolio',
-  'layout.nav.profile': 'Investor Profile',
+  'layout.nav.profile': 'Profile',
   'layout.nav.settings': 'Settings',
   'layout.nav.screening': 'Screening',
   'layout.navMenu': 'Navigation',
@@ -901,7 +903,9 @@ const en: Record<UiTextKey, string> = {
   'interviewWizard.loading': 'Analyzing, please wait...',
   'interviewWizard.error': 'Failed to get recommendations, please try again',
   'interviewWizard.resultTitle': 'Recommended strategies for you',
+  'interviewWizard.resultHint': 'Click a card to include or exclude it; keep at least one.',
   'interviewWizard.adopt': 'Adopt',
+  'interviewWizard.saving': 'Saving...',
   'interviewWizard.redo': 'Redo',
   'interviewWizard.skip': 'Skip',
 
