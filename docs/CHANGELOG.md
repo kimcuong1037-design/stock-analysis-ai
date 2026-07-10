@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 问股默认策略可来自已保存的投资画像
 - [新功能] 新增配置 AGENT_COMPARE_MAX 控制单次对比策略数（默认 3）
 - [修复] 问股页存在已保存投资画像时，显式选择「通用分析」（清空策略）现在会正确清空生效策略，不再被服务端画像回退接管
+- [新功能] 新增"价值低估"策略：基于多年自由现金流的确定性 DCF 估值工具 estimate_intrinsic_value + 安全边际判定，覆盖 A 股/港股/美股（数据不足时明确降级）
+- [修复] 修复投资画像访谈"价值低估"风格选项无策略命中的断点：value 分类推导 + value_undervalued/growth_quality 显式 profile_tags + 策略中心"价值"分组
 - [改进] 投资画像访谈结果卡片支持点选取舍推荐策略，「采用」按钮显示保存中状态，保存成功/失败提示移入卡片内可见位置
 - [修复] 英文界面下侧边栏导航项不再被长文案撑破布局，英文导航标签 Investor Profile 缩短为 Profile
 - [修复] 修复 Docker 构建失败：`requirements.txt` 中 `longbridge>=0.2.77` 不可满足（该 SDK 0.2.x 线已发布最高版本为 0.2.75，`>=0.2.77` 无匹配分发），收敛为 `longbridge>=0.2.75,<0.3` 恢复镜像构建；上界排除 API 不兼容的 4.x 线。

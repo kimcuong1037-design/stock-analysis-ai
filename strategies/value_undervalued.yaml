@@ -1,0 +1,64 @@
+# Value Undervalued Strategy / 价值低估
+
+name: value_undervalued
+display_name: 价值低估
+description: 巴菲特/芒格式价值投资：用多年自由现金流折现估算内在价值，只在市价显著低于内在价值（安全边际≥30%）时买入。
+category: value
+core_rules: [2, 3, 5]
+required_tools:
+  - get_stock_info
+  - get_realtime_quote
+  - estimate_intrinsic_value
+  - search_stock_news
+aliases: [价值, 价值投资, 低估, 价值低估, 安全边际]
+default_priority: 50
+
+profile_tags:
+  style: [value]
+  horizon: [long]
+  risk: [conservative, balanced]
+
+instructions: |
+  **价值低估策略（Value Undervalued Strategy）**
+
+  方法论：企业价值 = 存续期内可以拿出来的自由现金流的折现值（巴菲特/芒格/段永平）。
+  估算必须保守，结论必须留安全边际；买入的理由只有一个——价格明显低于价值。
+
+  分析框架（按顺序执行）：
+
+  1. **能力圈检查**
+     - 用 `get_stock_info` 查看收入、利润、经营现金流是否长期方向一致、可理解。
+     - 收入利润长期背离、现金流与利润严重不匹配、商业模式看不懂的公司，
+       直接降低确定性并提示回避，不要硬给估值结论。
+     - 银行/保险等金融股与强周期股：现金流口径特殊，本策略估值参考性有限，必须明确提示。
+
+  2. **好生意检查**
+     - ROE 水平与稳定性、毛利率、经营现金流对净利润的覆盖度、历史分红记录。
+     - 现金流质量差（利润高但收不到钱）时显著下调评分。
+
+  3. **内在价值（必须调用工具）**
+     - **必须调用 `estimate_intrinsic_value` 工具获取内在价值区间，禁止自行心算估值。**
+     - 引用工具返回的 assumptions（FCF 基数、增长率、折现率）向用户说明估值前提。
+     - 工具返回 `not_applicable`（自由现金流为负）：按价值策略应回避，signal 不高于 hold。
+     - 工具返回 `insufficient_data`：明确说明数据不足，只给观察结论，降低 confidence。
+     - 工具返回 `unknown`（缺市值）：用 `get_realtime_quote` 的总市值与估值区间自行对比折价。
+
+  4. **安全边际判定**
+     - 折价率 ≥ 30%（市值低于基准内在价值三成以上）才可给 buy / strong_buy。
+     - 折价不足 30%：给 hold，并明确说出"什么市值/价格才值得买"。
+     - 市值高于基准内在价值：给 sell 或 hold，说明高估程度。
+     - 港股/美股需核对币种：工具返回的 `currency` 字段是现金流的报表币种（如 CNY），
+       可能与市值所用的交易币种（如 HKD/USD）不同；两者可能不一致时，折价率仅供参考，
+       须在结论中说明币种假设，不给出斩钉截铁的低估/高估硬结论。
+     - 不依据短线技术形态操作；技术趋势仅用于确认长期基本面逻辑未被证伪。
+
+  输出要求：
+  - 明确公司处于：显著低估 / 合理 / 高估 / 不适用价值估值。
+  - 复述估值假设（FCF 基数、g1、折现率 10%、永续增长 2.5%），让用户看到保守程度。
+  - 给出安全边际口径的买点：对应折价 30% 的市值或股价水平。
+
+  评分调整建议：
+  - 折价 ≥ 30% 且现金流质量高（OCF 稳定覆盖净利润）：`sentiment_score +15`
+  - 折价 ≥ 30% 但依赖单年异常现金流或数据置信度为 medium：`sentiment_score +6`
+  - 工具返回 not_applicable（负自由现金流）：`sentiment_score -12`
+  - 市值高于基准内在价值（无安全边际）：`sentiment_score -10`

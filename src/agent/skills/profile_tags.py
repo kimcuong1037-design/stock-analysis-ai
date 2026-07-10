@@ -13,6 +13,7 @@ _CATEGORY_DEFAULTS: Dict[str, Dict[str, List[str]]] = {
     "pattern": {"style": ["framework"], "horizon": ["swing"], "risk": ["balanced"]},
     "reversal": {"style": ["reversal"], "horizon": ["swing"], "risk": ["aggressive"]},
     "framework": {"style": ["framework"], "horizon": ["swing", "long"], "risk": ["balanced"]},
+    "value": {"style": ["value"], "horizon": ["long"], "risk": ["conservative", "balanced"]},
 }
 
 _THEME_REGIMES = {"sector_hot", "theme", "hot_theme", "emotion", "event"}

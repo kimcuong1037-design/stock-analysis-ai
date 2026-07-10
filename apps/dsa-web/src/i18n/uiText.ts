@@ -406,6 +406,7 @@ const zh = {
   'strategyCenter.category.pattern': '形态',
   'strategyCenter.category.reversal': '反转',
   'strategyCenter.category.framework': '框架',
+  'strategyCenter.category.value': '价值',
   'strategyCenter.category.other': '其他',
 
   'interviewWizard.title': '策略偏好问卷',
@@ -877,6 +878,7 @@ const en: Record<UiTextKey, string> = {
   'strategyCenter.category.pattern': 'Pattern',
   'strategyCenter.category.reversal': 'Reversal',
   'strategyCenter.category.framework': 'Framework',
+  'strategyCenter.category.value': 'Value',
   'strategyCenter.category.other': 'Other',
 
   'interviewWizard.title': 'Strategy Preference Survey',

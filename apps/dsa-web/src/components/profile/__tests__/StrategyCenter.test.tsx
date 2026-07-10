@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { StrategyCenter } from '../StrategyCenter';
 
@@ -10,6 +10,7 @@ vi.mock('../../../api/agent', () => ({
           { id: 'bull_trend', name: '牛市趋势', description: '多头趋势策略', category: 'trend' },
           { id: 'chan_theory', name: '缠论', description: '缠论框架分析', category: 'framework' },
           { id: 'head_shoulders', name: '头肩顶', description: '头肩形态识别', category: 'pattern' },
+          { id: 'value_undervalued', name: '价值低估', description: '内在价值折现估值', category: 'value' },
         ],
         default_skill_id: 'bull_trend',
       }),
@@ -87,5 +88,15 @@ describe('StrategyCenter', () => {
     const selectedCard = await screen.findByTestId('skill-card-bull_trend');
     fireEvent.click(selectedCard);
     expect(onChange).toHaveBeenCalledWith(['chan_theory']);
+  });
+
+  it('groups value-category skills under the 价值 heading', async () => {
+    render(<StrategyCenter selected={[]} onChange={() => {}} maxSelected={3} />);
+    const heading = await screen.findByText('价值');
+    // Each category renders exactly one <section aria-label={label}> wrapping its heading and cards.
+    const section = heading.closest('section');
+    expect(section).not.toBeNull();
+    // Assert the skill card is nested inside the 价值 section, not merely rendered elsewhere.
+    expect(within(section as HTMLElement).getByText('价值低估')).toBeInTheDocument();
   });
 });

@@ -53,3 +53,12 @@ def test_tiebreak_by_default_priority_then_name():
     result = recommend_skills(answers, skills, max_count=5)
     # zeta(pri=5) < alpha(pri=10, name="alpha") < bravo(pri=10, name="bravo")
     assert result == ["zeta", "alpha", "bravo"]
+
+
+def test_value_style_interview_recommends_value_undervalued_from_real_skills():
+    from src.agent.factory import get_skill_manager
+
+    skills = get_skill_manager().list_skills()
+    answers = {"horizon": "long", "risk": "balanced", "style": "value", "watch": "low"}
+    result = recommend_skills(answers, skills, max_count=3)
+    assert "value_undervalued" in result
