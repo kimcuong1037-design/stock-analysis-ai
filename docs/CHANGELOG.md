@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
 - [修复] 桌面发布打包改用冻结可执行文件运行时探针校验 `alphasift.dsa_adapter`，避免 macOS PyInstaller 将模块内嵌进可执行文件时被文件系统/zip 扫描误判为缺失。
 - [文档] 新增 `docs/architecture/code-map.md` 代码地图，提供仓库结构总览、各子系统职责与端到端分析工作流，并登记到文档中心索引。
+- [修复] 修复 Docker 构建失败：`requirements.txt` 中 `longbridge>=0.2.77` 不可满足（该 SDK 0.2.x 线已发布最高版本为 0.2.75，`>=0.2.77` 无匹配分发），收敛为 `longbridge>=0.2.75,<0.3` 恢复镜像构建；上界排除 API 不兼容的 4.x 线。
 
 ## [3.21.0] - 2026-06-07
 
