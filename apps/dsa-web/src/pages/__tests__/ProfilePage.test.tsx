@@ -78,6 +78,19 @@ it('saves the interview recommendation with source interview after adopting', as
   });
 });
 
+it('shows save feedback after adopting the interview recommendation', async () => {
+  render(<ProfilePage />);
+
+  fireEvent.click(await screen.findByTestId('option-horizon-ultra_short'));
+  fireEvent.click(screen.getByTestId('option-risk-conservative'));
+  fireEvent.click(screen.getByTestId('option-style-trend'));
+  fireEvent.click(screen.getByTestId('option-watch-high'));
+
+  fireEvent.click(await screen.findByTestId('interview-adopt'));
+
+  expect(await screen.findByText('画像已保存')).toBeInTheDocument();
+});
+
 it('switches to the manual tab when the interview is skipped', async () => {
   render(<ProfilePage />);
 

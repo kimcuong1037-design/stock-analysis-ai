@@ -109,7 +109,11 @@ export const ProfilePage: React.FC = () => {
         ) : (
           <SectionCard title={tabs.find((tab) => tab.key === activeTab)?.label ?? ''}>
             {activeTab === 'interview' ? (
-              <InterviewWizard onComplete={handleInterviewComplete} onSkip={handleInterviewSkip} />
+              <InterviewWizard
+                onComplete={handleInterviewComplete}
+                onSkip={handleInterviewSkip}
+                isSaving={isSaving}
+              />
             ) : (
               <div className="space-y-4">
                 <StrategyCenter
@@ -133,11 +137,18 @@ export const ProfilePage: React.FC = () => {
                 </div>
               </div>
             )}
+            {saveFailed ? (
+              <div className="mt-4">
+                <InlineAlert variant="danger" message={t('profilePage.saveError')} />
+              </div>
+            ) : null}
+            {saveSucceeded ? (
+              <div className="mt-4">
+                <InlineAlert variant="success" message={t('profilePage.saveSuccess')} />
+              </div>
+            ) : null}
           </SectionCard>
         )}
-
-        {saveFailed ? <InlineAlert variant="danger" message={t('profilePage.saveError')} /> : null}
-        {saveSucceeded ? <InlineAlert variant="success" message={t('profilePage.saveSuccess')} /> : null}
       </div>
     </AppPage>
   );

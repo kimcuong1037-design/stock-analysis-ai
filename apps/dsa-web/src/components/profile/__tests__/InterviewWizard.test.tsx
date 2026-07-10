@@ -6,7 +6,10 @@ vi.mock('../../../api/agent', () => ({
   agentApi: {
     submitInterview: vi.fn(() =>
       Promise.resolve({
-        recommended: [{ id: 'hot_theme', name: '热门主题', description: '题材策略' }],
+        recommended: [
+          { id: 'hot_theme', name: '热门主题', description: '题材策略' },
+          { id: 'event_driven', name: '事件驱动', description: '事件策略' },
+        ],
         explanation: '适合你',
       }),
     ),
@@ -30,7 +33,10 @@ describe('InterviewWizard', () => {
     const { agentApi } = await import('../../../api/agent');
     vi.mocked(agentApi.submitInterview).mockClear();
     vi.mocked(agentApi.submitInterview).mockResolvedValue({
-      recommended: [{ id: 'hot_theme', name: '热门主题', description: '题材策略' }],
+      recommended: [
+        { id: 'hot_theme', name: '热门主题', description: '题材策略' },
+        { id: 'event_driven', name: '事件驱动', description: '事件策略' },
+      ],
       explanation: '适合你',
     });
   });
@@ -62,7 +68,7 @@ describe('InterviewWizard', () => {
     });
   });
 
-  it('calls onComplete with recommended ids when adopt button is clicked', async () => {
+  it('calls onComplete with all recommended ids when adopt button is clicked', async () => {
     const onComplete = vi.fn();
     render(<InterviewWizard onComplete={onComplete} onSkip={() => {}} />);
 
@@ -70,7 +76,44 @@ describe('InterviewWizard', () => {
 
     const adoptBtn = await screen.findByTestId('interview-adopt');
     fireEvent.click(adoptBtn);
+    expect(onComplete).toHaveBeenCalledWith(['hot_theme', 'event_driven']);
+  });
+
+  it('selects all recommended cards by default and toggles one off on click', async () => {
+    const onComplete = vi.fn();
+    render(<InterviewWizard onComplete={onComplete} onSkip={() => {}} />);
+
+    await answerAllQuestions();
+
+    const card = await screen.findByTestId('recommend-card-event_driven');
+    expect(card).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(card);
+    expect(card).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByTestId('interview-adopt'));
     expect(onComplete).toHaveBeenCalledWith(['hot_theme']);
+  });
+
+  it('disables adopt when every recommended card is deselected', async () => {
+    render(<InterviewWizard onComplete={() => {}} onSkip={() => {}} />);
+
+    await answerAllQuestions();
+
+    fireEvent.click(await screen.findByTestId('recommend-card-hot_theme'));
+    fireEvent.click(screen.getByTestId('recommend-card-event_driven'));
+
+    expect(screen.getByTestId('interview-adopt')).toBeDisabled();
+  });
+
+  it('disables adopt and shows busy state while saving', async () => {
+    render(<InterviewWizard onComplete={() => {}} onSkip={() => {}} isSaving />);
+
+    await answerAllQuestions();
+
+    const adoptBtn = await screen.findByTestId('interview-adopt');
+    expect(adoptBtn).toBeDisabled();
+    expect(adoptBtn).toHaveAttribute('aria-busy', 'true');
   });
 
   it('calls onSkip when skip button is clicked', async () => {

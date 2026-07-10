@@ -71,13 +71,15 @@ type WizardPhase =
 export interface InterviewWizardProps {
   onComplete: (ids: string[]) => void;
   onSkip: () => void;
+  isSaving?: boolean;
 }
 
-export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, onSkip }) => {
+export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, onSkip, isSaving = false }) => {
   const { t } = useUiLanguage();
 
   const [answers, setAnswers] = useState<Answers>({});
   const [state, setState] = useState<WizardPhase>({ phase: 'questions' });
+  const [adoptIds, setAdoptIds] = useState<string[]>([]);
 
   // ── Derived ─────────────────────────────────────────────────────────────────
 
@@ -99,6 +101,7 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
     setState({ phase: 'loading' });
     try {
       const result = await agentApi.submitInterview(finalAnswers);
+      setAdoptIds(result.recommended.map((s) => s.id));
       setState({ phase: 'result', recommended: result.recommended, explanation: result.explanation });
     } catch {
       setState({ phase: 'error', message: t('interviewWizard.error') });
@@ -107,7 +110,12 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
 
   const handleRedo = () => {
     setAnswers({});
+    setAdoptIds([]);
     setState({ phase: 'questions' });
+  };
+
+  const toggleAdopt = (id: string) => {
+    setAdoptIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   };
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -196,18 +204,54 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
       {/* Result */}
       {state.phase === 'result' && (
         <div className="space-y-4">
-          <h4 className="text-sm font-semibold text-foreground">{t('interviewWizard.resultTitle')}</h4>
+          <div>
+            <h4 className="text-sm font-semibold text-foreground">{t('interviewWizard.resultTitle')}</h4>
+            <p className="mt-0.5 text-xs text-secondary-text">{t('interviewWizard.resultHint')}</p>
+          </div>
 
           <div className="space-y-3">
-            {state.recommended.map((skill) => (
-              <div
-                key={skill.id}
-                className="rounded-xl border border-cyan/30 bg-cyan/5 p-4"
-              >
-                <p className="text-sm font-semibold text-foreground">{skill.name}</p>
-                <p className="mt-1 text-xs text-secondary-text">{skill.description}</p>
-              </div>
-            ))}
+            {state.recommended.map((skill) => {
+              const checked = adoptIds.includes(skill.id);
+              return (
+                <div
+                  key={skill.id}
+                  role="checkbox"
+                  aria-checked={checked}
+                  tabIndex={0}
+                  data-testid={`recommend-card-${skill.id}`}
+                  onClick={() => toggleAdopt(skill.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      toggleAdopt(skill.id);
+                    }
+                  }}
+                  className={cn(
+                    'relative cursor-pointer select-none rounded-xl border p-4 transition-all',
+                    'focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan/40',
+                    checked
+                      ? 'border-cyan/60 bg-cyan/10 shadow-soft-card'
+                      : 'border-border/60 bg-card/50 opacity-70 hover:border-cyan/40 hover:bg-card hover:opacity-100',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'absolute right-3 top-3 h-4 w-4 rounded border transition-colors',
+                      checked ? 'border-cyan bg-cyan' : 'border-border/60 bg-base',
+                    )}
+                    aria-hidden
+                  >
+                    {checked && (
+                      <svg viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-full w-full p-0.5">
+                        <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-base" />
+                      </svg>
+                    )}
+                  </span>
+                  <p className="pr-6 text-sm font-semibold text-foreground">{skill.name}</p>
+                  <p className="mt-1 pr-6 text-xs text-secondary-text">{skill.description}</p>
+                </div>
+              );
+            })}
           </div>
 
           {state.explanation && (
@@ -220,7 +264,12 @@ export const InterviewWizard: React.FC<InterviewWizardProps> = ({ onComplete, on
               variant="primary"
               size="sm"
               data-testid="interview-adopt"
-              onClick={() => onComplete(state.recommended.map((s) => s.id))}
+              disabled={adoptIds.length === 0 || isSaving}
+              isLoading={isSaving}
+              loadingText={t('interviewWizard.saving')}
+              onClick={() =>
+                onComplete(state.recommended.map((s) => s.id).filter((id) => adoptIds.includes(id)))
+              }
             >
               {t('interviewWizard.adopt')}
             </Button>
