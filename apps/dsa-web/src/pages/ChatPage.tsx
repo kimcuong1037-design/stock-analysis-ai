@@ -9,6 +9,8 @@ import { ApiErrorAlert, Badge, Button, ConfirmDialog, EmptyState, InlineAlert, S
 import { getParsedApiError } from '../api/error';
 import type { SkillInfo } from '../api/agent';
 import { DashboardStateBlock } from '../components/dashboard';
+import { SkillBreakdownTable } from '../components/chat/SkillBreakdownTable';
+import { SkillConsensusCard } from '../components/chat/SkillConsensusCard';
 import {
   useAgentChatStore,
   type Message,
@@ -56,6 +58,7 @@ const ChatPage: React.FC = () => {
   const [input, setInput] = useState('');
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [hasProfile, setHasProfile] = useState(false);
   const [showSkillDesc, setShowSkillDesc] = useState<string | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -254,9 +257,21 @@ const ChatPage: React.FC = () => {
   }, [loadInitialSession]);
 
   useEffect(() => {
-    agentApi.getSkills()
-      .then((res) => {
+    Promise.all([
+      agentApi.getSkills(),
+      agentApi.getProfile().catch(() => ({ skillIds: [] as string[], source: null, updatedAt: null })),
+    ])
+      .then(([res, profile]) => {
         setSkills(res.skills);
+        setHasProfile(profile.skillIds.length > 0);
+        const loadedSkillIds = new Set(res.skills.map((skill) => skill.id));
+        const profileSkillIds = profile.skillIds
+          .filter((id) => loadedSkillIds.has(id))
+          .slice(0, MAX_SELECTED_SKILLS);
+        if (profileSkillIds.length > 0) {
+          setSelectedSkillIds(profileSkillIds);
+          return;
+        }
         const defaultId =
           res.default_skill_id ||
           res.skills[0]?.id ||
@@ -450,10 +465,19 @@ const ChatPage: React.FC = () => {
         setActiveStockCode(stockCode);
       }
 
+      // When a saved profile exists, an explicit empty selection ("通用分析")
+      // must be sent as `skills: []` so the server honors the deliberate
+      // clear instead of falling back to the profile (field ABSENT = fall
+      // back to profile; `skills: []` = explicit clear, never overridden).
+      // Users without a saved profile keep the field omitted entirely.
       const payload = {
         message: msgText,
         session_id: sessionId,
-        ...(usedSkillIds.length > 0 ? { skills: usedSkillIds } : {}),
+        ...(usedSkillIds.length > 0
+          ? { skills: usedSkillIds }
+          : hasProfile
+            ? { skills: [] }
+            : {}),
         context: followUpContextRef.current ?? undefined,
       };
       followUpHydrationTokenRef.current += 1;
@@ -467,7 +491,7 @@ const ChatPage: React.FC = () => {
         skillName: usedSkillNames.join('、'),
       });
     },
-    [getSkillNames, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
+    [getSkillNames, hasProfile, input, loading, normalizeSelectedSkillIds, requestScrollToBottom, selectedSkillIds, sessionId, startStream],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1029,6 +1053,10 @@ const ChatPage: React.FC = () => {
                             {msg.content}
                           </Markdown>
                         </div>
+                        {msg.skillConsensus && <SkillConsensusCard consensus={msg.skillConsensus} />}
+                        {msg.skillBreakdown && msg.skillBreakdown.length > 0 && (
+                          <SkillBreakdownTable items={msg.skillBreakdown} />
+                        )}
                       </div>
                     ) : (
                       msg.content

@@ -699,6 +699,29 @@ class TestOrchestratorExecution(unittest.TestCase):
         skill.run.assert_called_once()
         decision.run.assert_called_once()
 
+    def test_build_specialist_agents_honors_configured_compare_max(self):
+        """AGENT_COMPARE_MAX (config.agent_compare_max) must raise the specialist
+        fan-out cap beyond the historical hardcoded 3, not just the API-layer cap
+        in api/v1/endpoints/agent.py::_resolve_effective_skills."""
+        orch = self._make_orchestrator(config=SimpleNamespace(agent_compare_max=5))
+        ctx = AgentContext(query="test", stock_code="600519")
+        ctx.meta["skills_requested"] = ["a", "b", "c", "d", "e", "f"]  # 6 requested
+
+        agents = orch._build_specialist_agents(ctx)
+
+        self.assertEqual(len(agents), 5)
+        self.assertEqual([a.skill_id for a in agents], ["a", "b", "c", "d", "e"])
+
+    def test_build_specialist_agents_defaults_to_three_without_config(self):
+        orch = self._make_orchestrator()  # config=None
+        ctx = AgentContext(query="test", stock_code="600519")
+        ctx.meta["skills_requested"] = ["a", "b", "c", "d", "e", "f"]
+
+        agents = orch._build_specialist_agents(ctx)
+
+        self.assertEqual(len(agents), 3)
+        self.assertEqual([a.skill_id for a in agents], ["a", "b", "c"])
+
     def test_execute_pipeline_skips_stage_when_remaining_budget_below_minimum(self):
         orch = self._make_orchestrator(config=SimpleNamespace(agent_orchestrator_timeout_s=20))
         ctx = AgentContext(query="test", stock_code="600519", stock_name="贵州茅台")

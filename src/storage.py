@@ -774,6 +774,20 @@ class AlertCooldownRecord(Base):
     )
 
 
+class InvestorProfileRecord(Base):
+    """Persisted investor strategy profile (single editable profile per owner)."""
+
+    __tablename__ = 'investor_profiles'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    owner_key = Column(String(64), nullable=False, unique=True, default='default', index=True)
+    skill_ids = Column(Text, nullable=False, default='[]')          # JSON array
+    interview_answers = Column(Text)                                # JSON object, nullable
+    source = Column(String(16), nullable=False, default='manual')   # 'manual' | 'interview'
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, index=True)
+
+
 class _DatabaseManagerMeta(type):
     """Serialize DatabaseManager construction across __new__ and __init__."""
 
@@ -2304,6 +2318,63 @@ class DatabaseManager(metaclass=_DatabaseManagerMeta):
                 "created_at": row.created_at,
                 "updated_at": row.updated_at,
             }
+
+    def get_investor_profile(self, owner_key: str = "default") -> Optional[Dict[str, Any]]:
+        """Return the single investor profile for an owner, or None."""
+        with self.session_scope() as session:
+            stmt = select(InvestorProfileRecord).where(
+                InvestorProfileRecord.owner_key == owner_key
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "skill_ids": json.loads(row.skill_ids or "[]"),
+                "interview_answers": json.loads(row.interview_answers) if row.interview_answers else None,
+                "source": row.source,
+                "updated_at": row.updated_at,
+            }
+
+    def upsert_investor_profile(
+        self,
+        skill_ids: List[str],
+        *,
+        source: str = "manual",
+        interview_answers: Optional[Dict[str, Any]] = None,
+        owner_key: str = "default",
+    ) -> Dict[str, Any]:
+        """Create or update the single investor profile for an owner.
+
+        Passing ``interview_answers=None`` (the default) leaves any previously
+        stored interview_answers unchanged.  To wipe a profile entirely, use
+        ``clear_investor_profile`` instead.
+        """
+        with self.session_scope() as session:
+            stmt = select(InvestorProfileRecord).where(
+                InvestorProfileRecord.owner_key == owner_key
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                row = InvestorProfileRecord(owner_key=owner_key)
+                session.add(row)
+            row.skill_ids = json.dumps(list(skill_ids), ensure_ascii=False)
+            row.source = source
+            if interview_answers is not None:
+                row.interview_answers = json.dumps(interview_answers, ensure_ascii=False)
+            session.flush()
+        return self.get_investor_profile(owner_key)
+
+    def clear_investor_profile(self, owner_key: str = "default") -> bool:
+        """Delete the investor profile for an owner. Returns True if a row was removed."""
+        with self.session_scope() as session:
+            stmt = select(InvestorProfileRecord).where(
+                InvestorProfileRecord.owner_key == owner_key
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                return False
+            session.delete(row)
+            return True
 
     def save_agent_provider_turn(
         self,

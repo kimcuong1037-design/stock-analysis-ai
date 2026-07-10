@@ -61,20 +61,58 @@ class ChatResponse(BaseModel):
     content: str
     session_id: str
     error: Optional[str] = None
+    skill_breakdown: List[Dict[str, Any]] = []
+    skill_consensus: Optional[Dict[str, Any]] = None
 
 class SkillInfo(BaseModel):
     id: str
     name: str
     description: str
+    category: str = "trend"
+    profile_tags: Dict[str, List[str]] = {}
 
 class SkillsResponse(BaseModel):
     skills: List[SkillInfo]
     default_skill_id: str = ""
 
 
+class LegacyStrategyInfo(BaseModel):
+    """Frozen legacy shape for the deprecated ``/strategies`` alias.
+
+    Intentionally excludes fields added later to ``SkillInfo`` (e.g.
+    ``category``, ``profile_tags``) so pre-existing legacy clients keep
+    receiving exactly the payload they were pinned to.
+    """
+
+    id: str
+    name: str
+    description: str
+
+
 class StrategiesResponse(BaseModel):
-    strategies: List[SkillInfo]
+    strategies: List[LegacyStrategyInfo]
     default_strategy_id: str = ""
+
+
+class ProfileResponse(BaseModel):
+    skill_ids: List[str] = []
+    source: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ProfileUpdateRequest(BaseModel):
+    skill_ids: List[str]
+    source: str = "manual"
+    interview_answers: Optional[Dict[str, Any]] = None
+
+
+class InterviewRequest(BaseModel):
+    answers: Dict[str, str]
+
+
+class InterviewResponse(BaseModel):
+    recommended: List[SkillInfo]
+    explanation: str
 
 
 class AgentModelDeployment(BaseModel):
@@ -101,6 +139,18 @@ async def get_agent_models():
     )
 
 
+def _skill_to_info(skill) -> SkillInfo:
+    """Build a SkillInfo payload, resolving profile_tags (with category fallback)."""
+    from src.agent.skills.profile_tags import resolve_profile_tags
+    return SkillInfo(
+        id=skill.name,
+        name=skill.display_name,
+        description=skill.description,
+        category=getattr(skill, "category", "trend") or "trend",
+        profile_tags=resolve_profile_tags(skill),
+    )
+
+
 def _build_skills_response(config) -> SkillsResponse:
     from src.agent.factory import get_skill_manager
     from src.agent.skills.defaults import get_primary_default_skill_id
@@ -119,7 +169,7 @@ def _build_skills_response(config) -> SkillsResponse:
         ),
     )
     skills = [
-        SkillInfo(id=skill.name, name=skill.display_name, description=skill.description)
+        _skill_to_info(skill)
         for skill in available_skills
     ]
     return SkillsResponse(
@@ -141,9 +191,135 @@ async def get_strategies():
     """Compatibility alias for legacy clients."""
     payload = _build_skills_response(get_config())
     return StrategiesResponse(
-        strategies=payload.skills,
+        strategies=[
+            LegacyStrategyInfo(id=s.id, name=s.name, description=s.description)
+            for s in payload.skills
+        ],
         default_strategy_id=payload.default_skill_id,
     )
+
+def _build_interview_explanation(config, answers: Dict[str, str], recommended: List["SkillInfo"]) -> str:
+    """Return an LLM-generated explanation of the recommendations, falling back to static text."""
+    if not recommended:
+        static = "暂无匹配的策略推荐。"
+    else:
+        static = "根据你的偏好，推荐：" + "；".join(f"{s.name}（{s.description}）" for s in recommended)
+    if not config.is_agent_available():
+        return static
+    try:
+        from src.agent.llm_adapter import LLMToolAdapter
+        adapter = LLMToolAdapter(config)
+        names = "、".join(s.name for s in recommended)
+        prompt = (
+            "你是投资助手。用 2-3 句中文，结合用户偏好解释为什么这些交易策略适合他，不要编造数据。"
+            f"用户偏好：{answers}。推荐策略：{names}。"
+            "各策略简介：" + "；".join(f"{s.name}:{s.description}" for s in recommended)
+        )
+        resp = adapter.call_text([{"role": "user", "content": prompt}], timeout=20)
+        text = (resp.content or "").strip()
+        if not text or getattr(resp, "provider", "") == "error":
+            return static
+        return text
+    except Exception as exc:  # noqa: BLE001 — explanation is best-effort, never blocks
+        logger.warning("interview explanation LLM failed, fallback to static: %s", exc)
+        return static
+
+
+@router.get("/profile", response_model=ProfileResponse)
+async def get_profile():
+    """Return the current investor profile (skill_ids, source, updated_at)."""
+    from src.storage import get_db
+    prof = get_db().get_investor_profile()
+    if not prof:
+        return ProfileResponse()
+    return ProfileResponse(
+        skill_ids=prof["skill_ids"],
+        source=prof["source"],
+        updated_at=str(prof["updated_at"]) if prof.get("updated_at") else None,
+    )
+
+
+@router.put("/profile", response_model=ProfileResponse)
+async def put_profile(request: ProfileUpdateRequest):
+    """Create or update the investor profile. Deduplicates and caps skill_ids at 5."""
+    from src.storage import get_db
+    skill_ids = list(dict.fromkeys(request.skill_ids))[:5]  # dedupe preserving order + cap at 5
+    prof = get_db().upsert_investor_profile(
+        skill_ids,
+        source=request.source,
+        interview_answers=request.interview_answers,
+    )
+    return ProfileResponse(
+        skill_ids=prof["skill_ids"],
+        source=prof["source"],
+        updated_at=str(prof["updated_at"]) if prof.get("updated_at") else None,
+    )
+
+
+@router.post("/profile/interview", response_model=InterviewResponse)
+async def post_interview(request: InterviewRequest):
+    """Run interview recommendation. Does NOT persist the result."""
+    from src.agent.factory import get_skill_manager
+    from src.agent.skills.profile_recommender import recommend_skills
+
+    config = get_config()
+    skill_manager = get_skill_manager(config)
+    available = [s for s in skill_manager.list_skills() if getattr(s, "user_invocable", True)]
+    rec_ids = recommend_skills(request.answers, available, max_count=3)
+    by_id = {s.name: s for s in available}
+    recommended = [
+        _skill_to_info(s)
+        for s in (by_id[i] for i in rec_ids if i in by_id)
+    ]
+    # Offload the (possibly LLM-backed) explanation call to a thread so a slow
+    # provider doesn't block the event loop for up to `timeout=20`s.
+    explanation = await asyncio.to_thread(
+        _build_interview_explanation, config, request.answers, recommended
+    )
+    return InterviewResponse(recommended=recommended, explanation=explanation)
+
+
+def _resolve_effective_skills(config, request_skills: Optional[List[str]]) -> Optional[List[str]]:
+    """Resolve the skills a chat run should use.
+
+    The saved investor profile is only consulted when the caller did NOT pass a
+    skills field (``request_skills is None``). An explicit selection — including
+    an explicit empty list (``[]`` = "no skills, clear context") — is honored
+    verbatim and never overridden by the profile, preserving existing chat
+    semantics. A resolved non-empty list is capped at ``config.agent_compare_max``.
+    """
+    if request_skills is None:
+        from src.storage import get_db
+        prof = get_db().get_investor_profile()
+        skills = list(prof["skill_ids"]) if (prof and prof.get("skill_ids")) else None
+    else:
+        skills = list(request_skills)
+    if not skills:
+        return skills  # None stays None (default behavior); [] stays [] (explicit clear)
+    cap = max(1, getattr(config, "agent_compare_max", 3))
+    return skills[:cap]
+
+
+def _enrich_breakdown_display_names(config, breakdown):
+    """Fill each breakdown item's display_name from the skill manager.
+
+    The orchestrator emits display_name == skill_id; the API resolves the
+    human-readable name here. Returns a list (empty when breakdown is empty).
+    """
+    if not breakdown:
+        return []
+    from src.agent.factory import get_skill_manager
+    names = {s.name: s.display_name for s in get_skill_manager(config).list_skills()}
+    return [
+        {
+            **item,
+            "display_name": names.get(item.get("skill_id"))
+            or item.get("display_name")
+            or item.get("skill_id"),
+        }
+        for item in breakdown
+    ]
+
 
 @router.post("/chat", response_model=ChatResponse)
 async def agent_chat(request: ChatRequest):
@@ -158,7 +334,7 @@ async def agent_chat(request: ChatRequest):
     session_id = request.session_id or str(uuid.uuid4())
     
     try:
-        skills = request.effective_skills
+        skills = _resolve_effective_skills(config, request.effective_skills)
         executor = _build_executor(config, skills or None)
 
         # Pass explicit skills into context for the orchestrator.
@@ -180,7 +356,11 @@ async def agent_chat(request: ChatRequest):
             success=result.success,
             content=result.content,
             session_id=session_id,
-            error=result.error
+            error=result.error,
+            skill_breakdown=_enrich_breakdown_display_names(
+                config, getattr(result, "skill_breakdown", []) or []
+            ),
+            skill_consensus=getattr(result, "skill_consensus", None),
         )
             
     except Exception as e:
@@ -390,9 +570,9 @@ async def agent_chat_stream(request: ChatRequest):
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
 
-    # Pass explicit skills into context for the orchestrator.
+    # Resolve skills: caller-provided > saved profile, capped at agent_compare_max.
     # Direct assignment so caller-provided skills always take precedence.
-    skills = request.effective_skills
+    skills = _resolve_effective_skills(config, request.effective_skills)
     stream_ctx = dict(request.context or {})
     if skills is not None:
         stream_ctx["skills"] = skills
@@ -421,6 +601,10 @@ async def agent_chat_stream(request: ChatRequest):
                     "error": result.error,
                     "total_steps": result.total_steps,
                     "session_id": session_id,
+                    "skill_breakdown": _enrich_breakdown_display_names(
+                        config, getattr(result, "skill_breakdown", []) or []
+                    ),
+                    "skill_consensus": getattr(result, "skill_consensus", None),
                 }),
                 loop,
             )

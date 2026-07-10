@@ -43,7 +43,8 @@ from src.agent.protocols import (
 from src.agent.runner import parse_dashboard_json
 from src.agent.tools.registry import ToolRegistry
 from src.agent.chat_context import build_visible_chat_history
-from src.config import AGENT_MAX_STEPS_DEFAULT, get_config
+from src.agent.skills.defaults import is_skill_agent_name, is_skill_consensus_name, extract_skill_id
+from src.config import AGENT_COMPARE_MAX_DEFAULT, AGENT_MAX_STEPS_DEFAULT, get_config
 from src.report_language import normalize_report_language
 
 if TYPE_CHECKING:
@@ -53,6 +54,56 @@ logger = logging.getLogger(__name__)
 
 # Valid orchestrator modes (ordered by cost/depth)
 VALID_MODES = ("quick", "standard", "full", "specialist")
+
+
+def build_skill_breakdown(ctx) -> List[Dict[str, Any]]:
+    """Extract per-skill opinions (pre-consensus, excluding the aggregate).
+
+    Iterates over ctx.opinions and returns one entry per individual skill
+    agent opinion.  The consensus opinion (agent_name="skill_consensus") is
+    explicitly excluded even though it shares the skill_ prefix.
+    """
+    out: List[Dict[str, Any]] = []
+    for op in ctx.opinions:
+        if not is_skill_agent_name(op.agent_name):
+            continue
+        if is_skill_consensus_name(op.agent_name):
+            continue
+        skill_id = extract_skill_id(op.agent_name) or op.agent_name
+        raw = getattr(op, "raw_data", None) or {}
+        out.append({
+            "skill_id": skill_id,
+            "display_name": skill_id,   # API layer enriches via skill_manager (Task 6)
+            "signal": op.signal,
+            "confidence": round(float(op.confidence), 4),
+            "score_adjustment": raw.get("score_adjustment", 0),
+            "reasoning": op.reasoning or raw.get("reasoning", ""),
+            "key_levels": getattr(op, "key_levels", None) or {},
+        })
+    return out
+
+
+def build_skill_consensus(ctx) -> Optional[Dict[str, Any]]:
+    """Extract the aggregated skill consensus opinion (post-aggregation).
+
+    Mirrors the ``skill_breakdown`` item shape (signal/confidence/
+    score_adjustment/reasoning) plus a display-ready ``skill_count`` field.
+    Returns ``None`` when no consensus opinion was produced — i.e. whenever
+    ``skill_breakdown`` is empty (no skill agents ran, or aggregation
+    failed) — matching the same absent/empty semantics used for
+    ``skill_breakdown``.
+    """
+    for op in ctx.opinions:
+        if is_skill_consensus_name(op.agent_name):
+            raw = getattr(op, "raw_data", None) or {}
+            return {
+                "signal": op.signal,
+                "confidence": round(float(op.confidence), 4),
+                "score_adjustment": raw.get("total_adjustment", 0),
+                "reasoning": op.reasoning or "",
+                "skill_count": raw.get("skill_count", 0),
+            }
+    return None
 
 
 @dataclass
@@ -69,6 +120,8 @@ class OrchestratorResult:
     model: str = ""
     error: Optional[str] = None
     stats: Optional[AgentRunStats] = None
+    skill_breakdown: List[Dict[str, Any]] = field(default_factory=list)
+    skill_consensus: Optional[Dict[str, Any]] = None
 
 
 class AgentOrchestrator:
@@ -294,6 +347,8 @@ class AgentOrchestrator:
             provider=orch_result.provider,
             model=orch_result.model,
             error=orch_result.error,
+            skill_breakdown=orch_result.skill_breakdown,
+            skill_consensus=orch_result.skill_consensus,
         )
 
     def chat(
@@ -350,6 +405,8 @@ class AgentOrchestrator:
             provider=orch_result.provider,
             model=orch_result.model,
             error=orch_result.error,
+            skill_breakdown=orch_result.skill_breakdown,
+            skill_consensus=orch_result.skill_consensus,
         )
 
     # -----------------------------------------------------------------
@@ -565,6 +622,8 @@ class AgentOrchestrator:
                 model=model_str,
                 error="Failed to parse dashboard JSON from agent response",
                 stats=stats,
+                skill_breakdown=ctx.get_data("skill_breakdown") or [],
+                skill_consensus=ctx.get_data("skill_consensus"),
             )
 
         return OrchestratorResult(
@@ -577,6 +636,8 @@ class AgentOrchestrator:
             provider=provider,
             model=model_str,
             stats=stats,
+            skill_breakdown=ctx.get_data("skill_breakdown") or [],
+            skill_consensus=ctx.get_data("skill_consensus"),
         )
 
     # -----------------------------------------------------------------
@@ -617,6 +678,22 @@ class AgentOrchestrator:
         else:
             return [technical, intel, decision]
 
+    def _get_compare_max(self) -> int:
+        """Return the configured cap on concurrent specialist skills.
+
+        Mirrors ``config.agent_compare_max`` (env ``AGENT_COMPARE_MAX``),
+        which ``Config.__post_init__`` already clamps to 1-5. Falls back to
+        the same default (3) when no config is wired in (e.g. some test
+        constructions), and re-clamps defensively in case a caller injects
+        an out-of-range value directly.
+        """
+        raw_value = getattr(self.config, "agent_compare_max", AGENT_COMPARE_MAX_DEFAULT)
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError):
+            value = AGENT_COMPARE_MAX_DEFAULT
+        return max(1, min(5, value))
+
     def _build_specialist_agents(self, ctx: AgentContext) -> list:
         """Build specialist sub-agents based on requested skills.
 
@@ -631,14 +708,15 @@ class AgentOrchestrator:
                 skill_instructions=self.skill_instructions,
                 technical_skill_policy=self.technical_skill_policy,
             )
+            compare_max = self._get_compare_max()
             router = SkillRouter()
-            selected = router.select_skills(ctx)
+            selected = router.select_skills(ctx, max_count=compare_max)
             if not selected:
                 return []
 
             from src.agent.skills.skill_agent import SkillAgent
             agents = []
-            for skill_id in selected[:3]:  # cap at 3 concurrent skills
+            for skill_id in selected[:compare_max]:  # cap at config.agent_compare_max concurrent skills
                 agent = self._prepare_agent(SkillAgent(
                     skill_id=skill_id,
                     **common_kwargs,
@@ -673,11 +751,6 @@ class AgentOrchestrator:
             consensus = aggregator.aggregate(ctx)
             if consensus:
                 ctx.opinions.append(consensus)
-                ctx.set_data("skill_consensus", {
-                    "signal": consensus.signal,
-                    "confidence": consensus.confidence,
-                    "reasoning": consensus.reasoning,
-                })
                 logger.info(
                     "[Orchestrator] skill consensus: signal=%s confidence=%.2f",
                     consensus.signal, consensus.confidence,
@@ -686,6 +759,10 @@ class AgentOrchestrator:
                 logger.info("[Orchestrator] no skill opinions to aggregate")
         except Exception as exc:
             logger.warning("[Orchestrator] skill aggregation failed: %s", exc)
+        # Store individual opinions AFTER aggregation so consensus is already
+        # in ctx.opinions, but is_skill_consensus_name filter excludes it.
+        ctx.set_data("skill_breakdown", build_skill_breakdown(ctx))
+        ctx.set_data("skill_consensus", build_skill_consensus(ctx))
 
     def _aggregate_strategy_opinions(self, ctx: AgentContext) -> None:
         """Compatibility wrapper for legacy tests/imports."""

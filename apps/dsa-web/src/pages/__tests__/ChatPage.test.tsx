@@ -19,6 +19,7 @@ function createDeferred<T>() {
 
 const {
   mockGetSkills,
+  mockGetProfile,
   mockDeleteChatSession,
   mockSendChat,
   mockGetSystemConfig,
@@ -30,6 +31,7 @@ const {
   mockFormatSessionAsMarkdown,
 } = vi.hoisted(() => ({
   mockGetSkills: vi.fn(),
+  mockGetProfile: vi.fn(),
   mockDeleteChatSession: vi.fn(),
   mockSendChat: vi.fn(),
   mockGetSystemConfig: vi.fn(),
@@ -74,6 +76,7 @@ const mockStoreState = {
 vi.mock('../../api/agent', () => ({
   agentApi: {
     getSkills: mockGetSkills,
+    getProfile: mockGetProfile,
     deleteChatSession: mockDeleteChatSession,
     sendChat: mockSendChat,
   },
@@ -166,6 +169,7 @@ beforeEach(() => {
     ],
     default_skill_id: 'bull_trend',
   });
+  mockGetProfile.mockResolvedValue({ skillIds: [], source: null, updatedAt: null });
   mockDeleteChatSession.mockResolvedValue(undefined);
   mockSendChat.mockResolvedValue({ success: true });
   mockGetWatchlist.mockResolvedValue([]);
@@ -396,7 +400,126 @@ describe('ChatPage', () => {
     expect(skillBadge).toHaveTextContent('趋势分析、均线金叉');
   });
 
+  it('renders the consensus card above the skill breakdown table when both are present', async () => {
+    mockStoreState.messages = [
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: '综合多策略分析结果',
+        skillBreakdown: [
+          {
+            skill_id: 'bull_trend',
+            display_name: '牛市趋势',
+            signal: 'buy',
+            confidence: 0.8,
+            score_adjustment: 12,
+            reasoning: '多头排列',
+            key_levels: {},
+          },
+        ],
+        skillConsensus: {
+          signal: 'hold',
+          confidence: 0.72,
+          score_adjustment: 4,
+          reasoning: '综合共识依据',
+          skill_count: 2,
+        },
+      },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    const consensusHeading = await screen.findByText('共识结论');
+    const breakdownHeading = await screen.findByText('策略对比');
+
+    // consensus card must precede (be "above") the breakdown table in DOM order
+    expect(
+      consensusHeading.compareDocumentPosition(breakdownHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it('does not render the consensus card when skillConsensus is absent', async () => {
+    mockStoreState.messages = [
+      { id: 'assistant-1', role: 'assistant', content: '普通分析结果' },
+    ];
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    await screen.findByText('普通分析结果');
+    expect(screen.queryByText('共识结论')).not.toBeInTheDocument();
+  });
+
   it('selects the default skill after loading skills', async () => {
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('checkbox', { name: '趋势分析' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '通用分析' })).not.toBeChecked();
+  });
+
+  it('prefills the strategy selector from the saved investor profile', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
+        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+      ],
+      default_skill_id: 'bull_trend',
+    });
+    mockGetProfile.mockResolvedValue({ skillIds: ['chan_theory'], source: 'manual', updatedAt: null });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('checkbox', { name: '缠论' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '趋势分析' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '通用分析' })).not.toBeChecked();
+  });
+
+  it('trims the profile prefill to the selection cap and ignores unknown skill ids', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
+        { id: 'ma_golden_cross', name: '均线金叉', description: '均线交叉' },
+        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+        { id: 'wave_theory', name: '波浪理论', description: '波浪分析' },
+      ],
+      default_skill_id: 'bull_trend',
+    });
+    mockGetProfile.mockResolvedValue({
+      skillIds: ['bull_trend', 'ma_golden_cross', 'unknown_skill', 'chan_theory', 'wave_theory'],
+      source: 'manual',
+      updatedAt: null,
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole('checkbox', { name: '趋势分析' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '均线金叉' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '缠论' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '波浪理论' })).not.toBeChecked();
+  });
+
+  it('keeps the default skill selection when the saved profile has no strategies', async () => {
+    mockGetProfile.mockResolvedValue({ skillIds: [], source: null, updatedAt: null });
+
     render(
       <MemoryRouter initialEntries={['/chat']}>
         <ChatPage />
@@ -463,6 +586,44 @@ describe('ChatPage', () => {
     const lastCall = mockStartStream.mock.calls[mockStartStream.mock.calls.length - 1];
     expect(lastCall[0]).toEqual(expect.objectContaining({ message: '分析 AAPL' }));
     expect(lastCall[0]).not.toHaveProperty('skills');
+    expect(lastCall[1]).toEqual(expect.objectContaining({
+      skillNames: ['通用'],
+      skillName: '通用',
+    }));
+  });
+
+  it('sends an explicit empty skills list when a saved profile exists and the user deselects all strategies', async () => {
+    mockGetSkills.mockResolvedValue({
+      skills: [
+        { id: 'bull_trend', name: '趋势分析', description: '默认趋势' },
+        { id: 'chan_theory', name: '缠论', description: '结构分析' },
+      ],
+      default_skill_id: 'bull_trend',
+    });
+    mockGetProfile.mockResolvedValue({ skillIds: ['chan_theory'], source: 'manual', updatedAt: null });
+
+    render(
+      <MemoryRouter initialEntries={['/chat']}>
+        <ChatPage />
+      </MemoryRouter>
+    );
+
+    // Profile prefill selects 缠论; deselecting it reaches 通用分析 (explicit clear).
+    const chanCheckbox = await screen.findByRole('checkbox', { name: '缠论' });
+    expect(chanCheckbox).toBeChecked();
+    fireEvent.click(chanCheckbox);
+    expect(screen.getByRole('checkbox', { name: '通用分析' })).toBeChecked();
+
+    fireEvent.change(screen.getByPlaceholderText(/分析 600519/), {
+      target: { value: '分析 AAPL' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => {
+      expect(mockStartStream).toHaveBeenCalled();
+    });
+    const lastCall = mockStartStream.mock.calls[mockStartStream.mock.calls.length - 1];
+    expect(lastCall[0]).toEqual(expect.objectContaining({ message: '分析 AAPL', skills: [] }));
     expect(lastCall[1]).toEqual(expect.objectContaining({
       skillNames: ['通用'],
       skillName: '通用',
