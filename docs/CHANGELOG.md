@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [改进] 投资画像访谈结果卡片支持点选取舍推荐策略，「采用」按钮显示保存中状态，保存成功/失败提示移入卡片内可见位置
 - [修复] 英文界面下侧边栏导航项不再被长文案撑破布局，英文导航标签 Investor Profile 缩短为 Profile
 - [修复] 修复 Docker 构建失败：`requirements.txt` 中 `longbridge>=0.2.77` 不可满足（该 SDK 0.2.x 线已发布最高版本为 0.2.75，`>=0.2.77` 无匹配分发），收敛为 `longbridge>=0.2.75,<0.3` 恢复镜像构建；上界排除 API 不兼容的 4.x 线。
+- [改进] akshare 港股日线连续超时后自动熔断降级到 Yahoo Finance，避免批量港股查询重复等待；可用 AKSHARE_HK_COOLDOWN_SECONDS 调整（默认 180 秒，0 关闭）
 
 ## [3.21.0] - 2026-06-07
 

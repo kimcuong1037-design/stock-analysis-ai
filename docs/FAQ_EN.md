@@ -66,6 +66,22 @@ This document compiles common issues encountered by users and their solutions.
 
 ---
 
+### Q4.1: Hong Kong stock analysis occasionally takes 15-20 seconds to return?
+
+**Symptom**: Querying an HK stock (e.g. hk00700) occasionally takes about 15-20 seconds to return.
+
+**Cause**: HK daily-line data defaults to AkShare (Eastmoney scraper) first. When the Eastmoney endpoint is unreachable/slow, the request only falls back to Yahoo Finance after a read timeout.
+
+**Solution**:
+1. A circuit breaker is now built in: after consecutive AkShare HK daily-line timeouts, it enters a cooldown period (default 180 seconds); during cooldown, AkShare is skipped and Yahoo Finance is used directly, avoiding repeated waits per HK stock.
+2. To adjust or disable it, set in `.env`:
+   ```bash
+   AKSHARE_HK_COOLDOWN_SECONDS=180   # cooldown in seconds; set to 0 to disable the circuit breaker
+   ```
+3. If HK stocks are your primary analysis target, consider configuring a more stable dedicated data source (e.g. Longbridge / Tushare credits).
+
+---
+
 ## Configuration Related
 
 ### Q5: GitHub Actions run failed, showing environment variable not found?
