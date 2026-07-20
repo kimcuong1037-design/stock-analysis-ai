@@ -418,7 +418,9 @@ class AkshareFetcher(BaseFetcher):
         # 东财补丁开启才执行打补丁操作
         if get_config().enable_eastmoney_patch:
             eastmoney_patch()
-    
+        self._hk_timeout_streak = 0
+        self._hk_cooldown_until = 0.0
+
     def _set_random_user_agent(self) -> None:
         """
         设置随机 User-Agent
@@ -820,38 +822,77 @@ class AkshareFetcher(BaseFetcher):
             
             raise DataFetchError(f"Akshare 获取美股数据失败: {e}") from e
 
+    def _hk_cooldown_remaining(self) -> float:
+        """当前冷却剩余秒数（非正表示未在冷却）。"""
+        return self._hk_cooldown_until - time.time()
+
+    def _hk_is_cooling_down(self) -> bool:
+        """港股日线是否处于熔断冷却期。冷却禁用（秒数<=0）时恒为 False。"""
+        if _hk_cooldown_seconds() <= 0:
+            return False
+        return self._hk_cooldown_remaining() > 0
+
+    def _reset_hk_timeout_streak(self) -> None:
+        self._hk_timeout_streak = 0
+
+    def _register_hk_timeout(self) -> None:
+        """记录一次港股日线超时；达到阈值则进入冷却。禁用时不累计、不熔断。"""
+        cooldown_seconds = _hk_cooldown_seconds()
+        if cooldown_seconds <= 0:
+            return
+        self._hk_timeout_streak += 1
+        if self._hk_timeout_streak >= _HK_TIMEOUT_STREAK_THRESHOLD:
+            self._hk_cooldown_until = time.time() + cooldown_seconds
+            logger.warning(
+                "[港股熔断] akshare 港股日线连续超时 %d 次，进入冷却 %ds",
+                self._hk_timeout_streak,
+                cooldown_seconds,
+            )
+
     def _fetch_hk_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
         获取港股历史数据
-        
+
         数据来源：ak.stock_hk_hist()
-        
+
         Args:
             stock_code: 港股代码，如 '00700', '01810'
             start_date: 开始日期，格式 'YYYY-MM-DD'
             end_date: 结束日期，格式 'YYYY-MM-DD'
-            
+
         Returns:
             港股历史数据 DataFrame
         """
         import akshare as ak
-        
+
+        # 熔断入口：冷却期内直接快速失败，交由管理器降级到下一数据源
+        if self._hk_is_cooling_down():
+            remaining = max(0.0, self._hk_cooldown_remaining())
+            logger.debug(
+                "[港股熔断] 冷却中，跳过 akshare 港股请求 %s，剩余约 %.0fs",
+                stock_code,
+                remaining,
+            )
+            raise DataFetchError(
+                f"Akshare 港股数据源冷却中，跳过（连续超时熔断），剩余约 {remaining:.0f}s"
+            )
+
         # 防封禁策略 1: 随机 User-Agent
         self._set_random_user_agent()
-        
+
         # 防封禁策略 2: 强制休眠
         self._enforce_rate_limit()
-        
+
         # 确保代码格式正确（5位数字）
         code = stock_code.lower().replace('hk', '').zfill(5)
-        
+
         logger.info(f"[API调用] ak.stock_hk_hist(symbol={code}, period=daily, "
                    f"start_date={start_date.replace('-', '')}, end_date={end_date.replace('-', '')}, adjust=qfq)")
-        
+
         try:
             import time as _time
             api_start = _time.time()
-            
+
             # 调用 akshare 获取港股日线数据
             df = ak.stock_hk_hist(
                 symbol=code,
@@ -860,9 +901,12 @@ class AkshareFetcher(BaseFetcher):
                 end_date=end_date.replace('-', ''),
                 adjust="qfq"  # 前复权
             )
-            
+
             api_elapsed = _time.time() - api_start
-            
+
+            # 成功完成（未超时）→ 打断连续超时计数
+            self._reset_hk_timeout_streak()
+
             # 记录返回数据摘要
             if df is not None and not df.empty:
                 logger.info(f"[API返回] ak.stock_hk_hist 成功: 返回 {len(df)} 行数据, 耗时 {api_elapsed:.2f}s")
@@ -871,19 +915,24 @@ class AkshareFetcher(BaseFetcher):
                 logger.debug(f"[API返回] 最新3条数据:\n{df.tail(3).to_string()}")
             else:
                 logger.warning(f"[API返回] ak.stock_hk_hist 返回空数据, 耗时 {api_elapsed:.2f}s")
-            
+
             return df
-            
+
         except Exception as e:
+            # 仅超时类失败计入熔断，其余维持既有语义
+            category, _detail = _classify_realtime_http_error(e)
+            if category == "timeout":
+                self._register_hk_timeout()
+
             error_msg = str(e).lower()
-            
+
             # 检测反爬封禁
             if any(keyword in error_msg for keyword in ['banned', 'blocked', '频率', 'rate', '限制']):
                 logger.warning(f"检测到可能被封禁: {e}")
                 raise RateLimitError(f"Akshare 可能被限流: {e}") from e
-            
+
             raise DataFetchError(f"Akshare 获取港股数据失败: {e}") from e
-    
+
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         """
         标准化 Akshare 数据
