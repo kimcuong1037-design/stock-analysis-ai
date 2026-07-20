@@ -69,17 +69,17 @@ _HK_TIMEOUT_STREAK_THRESHOLD = 2
 
 
 def _hk_cooldown_seconds() -> int:
-	"""akshare 港股日线连续超时后的冷却秒数；0 表示禁用熔断。
+    """akshare 港股日线连续超时后的冷却秒数；0 表示禁用熔断。
 
-	解析规则与 Longbridge 连接冷却一致：空值/非法值回落默认 180，负值按 0 处理。
-	"""
-	raw = os.getenv("AKSHARE_HK_COOLDOWN_SECONDS", "").strip()
-	if raw == "":
-		return _DEFAULT_HK_COOLDOWN_SECONDS
-	try:
-		return max(0, int(raw))
-	except ValueError:
-		return _DEFAULT_HK_COOLDOWN_SECONDS
+    解析规则与 Longbridge 连接冷却一致：空值/非法值回落默认 180，负值按 0 处理。
+    """
+    raw = os.getenv("AKSHARE_HK_COOLDOWN_SECONDS", "").strip()
+    if raw == "":
+        return _DEFAULT_HK_COOLDOWN_SECONDS
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _DEFAULT_HK_COOLDOWN_SECONDS
 
 
 # User-Agent 池，用于随机轮换
