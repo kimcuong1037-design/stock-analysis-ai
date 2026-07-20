@@ -178,3 +178,49 @@ def test_non_timeout_error_does_not_count(monkeypatch, hk_fetcher):
             hk_fetcher._fetch_hk_data(_HK_CODE, _START, _END)
     assert hk_fetcher._hk_timeout_streak == 0
     assert not hk_fetcher._hk_is_cooling_down()
+
+
+from data_provider.base import BaseFetcher, DataFetcherManager
+
+
+class _OkYfinanceStub(BaseFetcher):
+    """最小可用的 yfinance 替身：直接返回标准化日线，绕过 normalize/clean/indicators。"""
+
+    name = "YfinanceFetcher"
+    priority = 4
+
+    def _fetch_raw_data(self, stock_code, start_date, end_date):  # pragma: no cover
+        raise NotImplementedError
+
+    def _normalize_data(self, df, stock_code):  # pragma: no cover
+        return df
+
+    def get_daily_data(self, stock_code, start_date=None, end_date=None, days=30):
+        return pd.DataFrame(
+            {
+                "date": ["2026-07-16", "2026-07-17"],
+                "open": [478.0, 488.8],
+                "high": [494.8, 488.8],
+                "low": [477.4, 458.0],
+                "close": [484.0, 461.6],
+                "volume": [42851475, 36237657],
+            }
+        )
+
+
+def test_manager_falls_back_to_yfinance_while_akshare_cooling(monkeypatch):
+    monkeypatch.setenv("AKSHARE_HK_COOLDOWN_SECONDS", "180")
+    akshare_fetcher = AkshareFetcher()
+    monkeypatch.setattr(akshare_fetcher, "_enforce_rate_limit", lambda: None)
+    monkeypatch.setattr(akshare_fetcher, "_set_random_user_agent", lambda: None)
+    # 预置为冷却中
+    akshare_fetcher._hk_cooldown_until = time.time() + 999
+
+    fake = _install_fake_ak(monkeypatch, [_make_success_df()])  # 若被调用即视为熔断失效
+
+    manager = DataFetcherManager(fetchers=[akshare_fetcher, _OkYfinanceStub()])
+    df, source = manager.get_daily_data(_HK_CODE, days=30)
+
+    assert source == "YfinanceFetcher"
+    assert not df.empty
+    assert fake.calls == 0  # akshare 冷却期内未触网
