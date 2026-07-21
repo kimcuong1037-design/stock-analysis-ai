@@ -837,6 +837,8 @@ class AkshareFetcher(BaseFetcher):
 
     def _register_hk_timeout(self) -> None:
         """记录一次港股日线超时；达到阈值则进入冷却。禁用时不累计、不熔断。"""
+        # streak 只在成功时清零（见 _reset_hk_timeout_streak）；非超时失败不清零，
+        # 冷却到期后也不清零——故冷却结束后首个探测再超时即立刻重新熔断，成功则自愈。
         cooldown_seconds = _hk_cooldown_seconds()
         if cooldown_seconds <= 0:
             return

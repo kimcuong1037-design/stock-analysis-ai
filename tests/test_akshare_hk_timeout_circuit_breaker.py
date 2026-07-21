@@ -10,7 +10,6 @@ from tests.litellm_stub import ensure_litellm_stub
 
 ensure_litellm_stub()
 
-from data_provider import akshare_fetcher as hk_mod
 from data_provider.akshare_fetcher import AkshareFetcher, _hk_cooldown_seconds
 from data_provider.base import DataFetchError, RateLimitError
 
