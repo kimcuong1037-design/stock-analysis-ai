@@ -353,6 +353,11 @@ class TestSettingsHelpMetadata(unittest.TestCase):
         self.assertFalse(field["is_editable"])
         self.assertIn("auth_settings_endpoint_required", field.get("warning_codes", []))
 
+    def test_alphasift_registry_defaults_to_enabled(self):
+        field = get_field_definition("ALPHASIFT_ENABLED")
+        self.assertEqual(field["default_value"], "true")
+        self.assertIn("explicit false", field["description"])
+
 
 class TestIssue1512SettingsFields(unittest.TestCase):
     """Issue #1512 visible fields must be explicitly registered."""

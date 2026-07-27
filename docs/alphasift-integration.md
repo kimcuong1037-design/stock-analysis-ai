@@ -1,11 +1,12 @@
 # AlphaSift 选股集成说明
 
-AlphaSift 作为独立仓库维护的选股引擎接入 DSA。DSA 默认不启用它，也不把 AlphaSift 的策略逻辑复制进主仓库；后端依赖会随 `requirements.txt` 安装，启用后只通过 `alphasift.dsa_adapter` 稳定适配层调用 AlphaSift。
+AlphaSift 作为独立仓库维护的选股引擎接入 DSA。DSA 在未声明环境变量时默认启用它，但不把 AlphaSift 的策略逻辑复制进主仓库；后端依赖会随 `requirements.txt` 安装，启用后只通过 `alphasift.dsa_adapter` 稳定适配层调用 AlphaSift。
 
 ## 当前方案
 
-- 默认关闭：`ALPHASIFT_ENABLED=false`。
-- 启用入口：设置页或选股页点击开启，或在 `.env` 中配置 `ALPHASIFT_ENABLED=true`。
+- 默认开启：未声明环境变量时按 `ALPHASIFT_ENABLED=true` 运行；显式设置 `false` 仍可关闭策略读取和选股执行。
+- 固定入口：左侧“选股”导航始终显示。关闭服务、依赖缺失或适配层异常时仍可进入选股页查看状态与修复指引。
+- 升级兼容：不会自动改写已有 `.env`；旧实例显式保存的 `ALPHASIFT_ENABLED=false` 会继续生效，需要由部署方主动开启。
 - 依赖来源：`requirements.txt` 固定到已验证的 AlphaSift 适配层 commit：`git+https://github.com/ZhuLinsen/alphasift.git@1a0ed8c99b3615c0cb1076e6029827ffc6de2344#egg=alphasift`。该来源覆盖 `alphasift.dsa_adapter` 契约与 `screen/list_strategies/get_status` 调用。
 - 修复安装来源：`ALPHASIFT_INSTALL_SPEC` 仍保留，默认等于同一个受信任 commit。它不再是策略列表或选股接口的运行时安装主路径，只用于显式调用 `/api/v1/alphasift/install` 时做修复安装和来源校验。
 - 缺失依赖边界：如果运行环境缺少 `alphasift.dsa_adapter`，`status` 返回 `available=false + diagnostics.reason=missing_module`；`strategies` 和 `screen` 返回 `424` 并提示执行 `pip install -r requirements.txt` 或重建 Docker/桌面后端产物，不会在业务请求中自动 `pip install`。
@@ -13,7 +14,7 @@ AlphaSift 作为独立仓库维护的选股引擎接入 DSA。DSA 默认不启�
 - 策略归属：策略列表、策略参数、全市场快照、初筛、因子评分和 LLM 重排由 AlphaSift 负责；DSA 负责开关、API 壳、数据 provider、展示和错误提示。
 - DSA 增强：AlphaSift 通过 DSA provider context 在 LLM 重排前只补充 Top 候选的轻量实时行情和基本面上下文，不在初筛阶段抓新闻；DSA API 返回阶段会对最终 Top 候选补新闻和辅助摘要，并通过 `dsa_enrichment` 记录复用或补全情况。
 - 日 K 线补特征：DSA 调用 AlphaSift 时会优先复用 DSA 历史行情加载链路（数据库缓存、Tushare、Efinance、Akshare、Pytdx、Baostock、Yfinance 等 fallback），仅在 DSA 链路无可用数据时回退到 AlphaSift 原始日线数据源，减少单一上游超时拖垮选股。
-- LLM 环境：DSA 调用 AlphaSift 时会桥接 DSA 已解析的 `LITELLM_MODEL`、`LITELLM_FALLBACK_MODELS`、`LLM_CHANNELS`、`LLM_<NAME>_*`、`LITELLM_CONFIG`、渠道额外请求头和各模型密钥；AlphaSift 独立运行时仍使用自己的 `.env`/环境变量。
+- LLM 环境：DSA 调用 AlphaSift 时会桥接 DSA 已解析的 `LITELLM_MODEL`、`LITELLM_FALLBACK_MODELS`、`LLM_CHANNELS`、`LLM_<NAME>_*`、`LITELLM_CONFIG`、渠道 Base URL、渠道额外请求头和各模型密钥；调用期会按模型强制绑定匹配渠道的 Key/Base URL/headers，避免兼容协议渠道在重试时回落到同协议的 legacy provider 账号。AlphaSift 独立运行时仍使用自己的 `.env`/环境变量。
 - 快照源：DSA 调用 AlphaSift 时，未显式配置 `SNAPSHOT_SOURCE_PRIORITY` 会默认优先使用 `em_datacenter`，减少 Tushare/东方财富行情接口在夜间或网络抖动时逐个失败造成的等待；显式配置的源顺序会原样保留。
 - 风险提示：前端设置页和选股页展示第三方来源与投资风险说明；不会弹窗打断用户。
 
@@ -102,7 +103,7 @@ AlphaSift 侧已在 `ZhuLinsen/alphasift@1a0ed8c99b3615c0cb1076e6029827ffc6de234
 - `/api/v1/alphasift/install`：显式修复安装入口。桌面模式（`DSA_DESKTOP_MODE=true`）不要求管理员会话，非桌面部署必须启用 `ADMIN_AUTH_ENABLED=true` 并携带有效管理员会话，否则返回 `401/403`。接口只允许默认受信任安装来源，并会强制重装锁定 commit，避免旧版 `alphasift` 包残留。
 - `/api/v1/alphasift/strategies`：读取 AlphaSift 策略列表；如果 `ALPHASIFT_ENABLED=true` 但适配层缺失或状态异常，返回 `424 + diagnostics`，不触发运行时安装。
 - `/api/v1/alphasift/screen`：调用适配层 `screen(..., use_llm=True)`，并在调用期间临时注入 DSA 已解析的 LLM 运行环境，同时向适配层传入结构化 LLM/DSA provider 配置；AlphaSift 在 LLM 前只消费轻量 DSA provider context，并优先通过 DSA 日线链路补齐 AlphaSift 因子特征，DSA 返回阶段对最终 Top 候选补新闻并复用已增强字段。适配层缺失或运行时异常返回 `424 + diagnostics` 并保留原始错误边界。
-- `/api/v1/alphasift/screen/tasks`：Web/桌面选股页使用的后台任务入口，提交后立即返回 `task_id`，实际选股在共享任务队列中继续执行，避免浏览器长请求被外部快照、行情、新闻或 LLM 延迟拖到超时。
+- `/api/v1/alphasift/screen/tasks`：Web/桌面选股页使用的后台任务入口。入队前先校验开关、适配层、市场和策略；校验失败直接返回 `403/424/400/422`，不会创建必然失败的后台任务。校验通过后立即返回 `task_id`，实际选股在共享任务队列中继续执行，避免浏览器长请求被外部快照、行情、新闻或 LLM 延迟拖到超时。
 - `/api/v1/alphasift/screen/tasks/{task_id}`：查询后台选股任务状态。进行中返回 `pending/processing + progress/message`，完成后在 `result` 中返回与 `/screen` 相同的候选结构，失败时返回 `failed + error`；仅接受 `report_type=alphasift_screen` 的任务 ID，普通分析任务不会被误读为选股结果。
 
 ## 配置兼容边界（LLM / LiteLLM / Base URL）
@@ -152,9 +153,14 @@ AlphaSift 侧已在 `ZhuLinsen/alphasift@1a0ed8c99b3615c0cb1076e6029827ffc6de234
 
 - 设置页提供 AlphaSift 开关，开启后写入 `ALPHASIFT_ENABLED=true` 并检查适配层是否可用；若缺失，会回滚开关并提示执行 `pip install -r requirements.txt` 或重建 Docker/桌面后端产物。
 - `ALPHASIFT_ENABLED` 是“开启选股”按钮背后的持久化状态，不作为普通数据源配置项重复展示。
+- 左侧“选股”导航固定显示，不再根据 `ALPHASIFT_ENABLED` 或状态接口结果隐藏；导航可见性不代表后端一定可运行。
 - 选股页未开启时展示开启按钮；开启后读取 AlphaSift 策略列表。
+- 页面加载、服务启动和导航渲染都不会自动创建选股任务；只有用户点击“运行选股”才会访问全市场快照、数据源和 LLM。
 - 当前只暴露 A 股 `cn` 市场。
 - 默认返回数量为 3，避免一次选股过慢或结果过多。
+- 最终 Top 3 候选默认以最多 3 个 worker 并发补充行情、基本面和新闻，输出仍按原 rank 排序，单候选失败不会取消其它候选。可将 `ALPHASIFT_ENRICHMENT_MAX_WORKERS=1` 回退到原串行增强路径。
+- 同步与后台选股结果均包含可选 `timings` 毫秒诊断。当前锁定 adapter 尚未提供内部阶段 callback，因此主运行统一记录为 `alphasift_screen_ms`，不会通过日志猜测快照、过滤或 LLM 阶段。
+- 后台结果额外记录 `queue_wait_ms`；失败响应也保留已结束阶段的 timings，便于区分排队、runtime lock、AlphaSift 主运行和 DSA 后置增强。
 - 选股页通过后台任务提交和状态轮询获取结果；任务 ID 会保存在当前浏览器 tab 的 `sessionStorage`，切换页面后返回选股页会继续恢复进度或最终结果。后端重启或任务被清理时，前端会提示任务不可恢复并允许重新运行。
 - 结果页展示运行 ID、样本数量、过滤后数量、LLM 是否重排、LLM 覆盖率和 DSA 增强计数；如果 AlphaSift 返回 warning/source error/LLM parse error 或 `llm_ranked=false`，页面会明确显示降级原因，避免把本地因子结果误展示成正常 LLM 判断；重复的快照源 fallback warning/source error 会在前端合并展示为一条“数据源降级”提示。
 - 展开候选时展示 AlphaSift 摘要、因子和 LLM 判断；若 DSA 已增强，还会展示 `DSA 增强摘要`、`DSA 新闻` 和 `DSA 增强提示`。
@@ -163,11 +169,11 @@ AlphaSift 侧已在 `ZhuLinsen/alphasift@1a0ed8c99b3615c0cb1076e6029827ffc6de234
 
 源码运行的桌面端复用同一个 Python 后端环境，并设置 `DSA_DESKTOP_MODE=true`；通过设置页开启时如缺少适配层，会提示更新依赖或重建后端产物。
 
-打包后的桌面端不依赖运行期 `pip install`：Windows/CI 使用 `scripts/build-backend.ps1`，macOS 使用 `scripts/build-backend-macos.sh`，两者均先执行 `pip install -r requirements.txt`，再校验并收集 `alphasift.dsa_adapter` 进 PyInstaller 产物。发布包默认仍关闭；用户在 Web 设置页开启后会先检查适配层，若打包产物异常缺失，应重建或更新桌面后端。
+打包后的桌面端不依赖运行期 `pip install`：Windows/CI 使用 `scripts/build-backend.ps1`，macOS 使用 `scripts/build-backend-macos.sh`，两者均先执行 `pip install -r requirements.txt`，再校验并收集 `alphasift.dsa_adapter` 进 PyInstaller 产物。发布包在未显式配置时默认开启；若历史配置明确保存 `false` 则继续关闭。打包产物异常缺失时，应重建或更新桌面后端。
 
 ## Docker 说明
 
-Docker 镜像与桌面发布包保持一致：`docker/Dockerfile` 会通过 `requirements.txt` 安装 AlphaSift 并校验 `alphasift.dsa_adapter` 可导入。容器运行时默认仍关闭 AlphaSift；用户通过 `ALPHASIFT_ENABLED=true` 或 Web 设置页开启后使用镜像内置依赖，若运行环境缺失适配层，应重新构建镜像。
+Docker 镜像与桌面发布包保持一致：`docker/Dockerfile` 会通过 `requirements.txt` 安装 AlphaSift 并校验 `alphasift.dsa_adapter` 可导入。容器未显式配置时默认开启；已有 `env_file` 中的显式 `false` 继续覆盖代码默认值。若运行环境缺失适配层，应重新构建镜像。
 
 ## 验证记录
 
@@ -177,8 +183,23 @@ Docker 镜像与桌面发布包保持一致：`docker/Dockerfile` 会通过 `req
 - `cd apps/dsa-web && npm run lint`
 - `cd apps/dsa-web && npm run build`
 
+2026-07-26 本地生产就绪 smoke（同源拓扑 `127.0.0.1:8000`，进程级覆盖 `ALPHASIFT_ENABLED=true`）：
+
+- 健康检查、Web 根页面、`status` 和 `strategies` 均成功；适配层 `available=true`、contract v1、版本 0.2.0、8 个 A 股策略。
+- `quality_value`：快照 5198、过滤后 315、候选 3，LLM 重排成功且覆盖率 1.0，DSA 增强 3/3；新闻搜索不可用、基本面增强部分超时均作为 warning 保留，未拖垮任务。
+- `capital_heat`：快照 5198、过滤后 33、候选 3；当前 LLM provider 拒绝请求后明确降级为本地因子排序，`llm_ranked=false`、coverage 0，并返回 parse error/warning；DSA 增强 3/3，但新闻仍不可用。
+- 显式 `ALPHASIFT_ENABLED=false` 时，`status` 保持可见，`strategies` 和后台任务提交均立即返回 403；不存在或过期任务返回 404“不可恢复”。后台任务入口的提交前校验已由回归测试覆盖。
+- 当前只完成 P0 真实 smoke 和部分 P1 降级/关闭验收。Docker 512MB、峰值内存、双任务并发、重启丢失、完整故障矩阵以及第二交易日质量样本尚未完成，因此暂不作 Go 决策，也不进入部署。
+
+2026-07-27 Phase 1 性能验证：
+
+- 确定性 5 轮 benchmark 中，3 个候选串行增强中位数约 162.7ms，并发增强中位数约 57.2ms，降低 64.8%；每轮增强调用数均为 3，没有重复请求，tracemalloc 峰值约从 0.034MB 增至 0.043MB。
+- 双任务回归测试覆盖 LLM headers、candidate 和 timings 隔离。
+- 授权联网的真实运行可完成全市场快照，但 LLM provider 在单次 60 秒 timeout 后继续 JSON retry / fallback，超过约 3 分钟仍未形成终态。当前锁定 adapter 缺少整体 LLM deadline，因此真实暖运行中位数仍是 Phase 1 阻断项。
+
 ## 回滚
 
 - 关闭功能：设置页关闭 AlphaSift，或配置 `ALPHASIFT_ENABLED=false`。
 - 禁止启用：保持 `ALPHASIFT_ENABLED=false`；如需使用默认来源之外的 AlphaSift 安装包，先在后端 Python 环境完成手动安装并确认 `alphasift.dsa_adapter` 可导入。
-- 回滚代码：移除 AlphaSift API 注册、Web 选股入口和相关配置项即可恢复到集成前流程；默认关闭状态下不会影响原有股票分析、报告生成和通知流程。
+- 关闭服务后左侧“选股”入口仍保留，用于展示关闭状态和恢复入口；原有分析、报告和通知流程不受影响。
+- 如需恢复旧版“默认关闭且关闭后隐藏导航”的产品行为，需要同时回滚后端默认值和 Web 固定导航改动。

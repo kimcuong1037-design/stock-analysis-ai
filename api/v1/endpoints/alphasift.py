@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -96,20 +97,52 @@ def alphasift_start_screen_task(
     http_request: Request,
     config: Config = Depends(get_config_dep),
 ) -> AlphaSiftScreenAccepted:
+    service = _service(config)
+    service.validate_screen_request(
+        strategy=request.strategy,
+        market=request.market,
+    )
+
     task_id = uuid.uuid4().hex
     task_queue = get_task_queue()
+    queued_at_monotonic = time.monotonic()
 
     def run_screen() -> Dict[str, Any]:
+        queue_wait_ms = max(0, int(round((time.monotonic() - queued_at_monotonic) * 1000)))
         task_queue.update_task_progress(
             task_id,
             20,
             "正在执行 AlphaSift 选股，外部数据源较慢时会持续后台运行",
         )
-        result = _service(config).screen(
+        result = service.screen(
             strategy=request.strategy,
             market=request.market,
             max_results=request.max_results,
+            progress_callback=lambda stage, metrics: task_queue.update_task_progress(
+                task_id,
+                {
+                    "alphasift_screen": 20,
+                    "snapshot": 25,
+                    "filter": 35,
+                    "llm_rank": 50,
+                    "normalize": 65,
+                    "enrich": 70,
+                    "finalize": 90,
+                }.get(stage, 20),
+                {
+                    "alphasift_screen": "正在执行 AlphaSift 选股",
+                    "snapshot": "正在获取市场快照",
+                    "filter": "正在执行策略过滤与评分",
+                    "llm_rank": "正在执行 LLM 候选重排",
+                    "normalize": "正在整理候选结果",
+                    "enrich": "正在补充候选行情、基本面与新闻",
+                    "finalize": "选股已完成，正在整理结果",
+                }.get(stage, "AlphaSift 选股仍在运行"),
+            ),
         )
+        timings = result.setdefault("timings", {})
+        if isinstance(timings, dict):
+            timings["queue_wait_ms"] = queue_wait_ms
         task_queue.update_task_progress(
             task_id,
             90,

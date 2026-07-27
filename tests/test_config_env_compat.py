@@ -94,6 +94,58 @@ class ConfigEnvCompatibilityTestCase(unittest.TestCase):
 
     @patch("src.config.setup_env")
     @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_alphasift_defaults_to_enabled_when_env_missing(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(os.environ, {"STOCK_LIST": "600519"}, clear=True):
+            config = Config._load_from_env()
+
+        self.assertTrue(config.alphasift_enabled)
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_alphasift_enrichment_concurrency_clamps_to_supported_range(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(
+            os.environ,
+            {"STOCK_LIST": "600519", "ALPHASIFT_ENRICHMENT_MAX_WORKERS": "9"},
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertEqual(config.alphasift_enrichment_max_workers, 3)
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_alphasift_honors_explicit_disabled_value(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(
+            os.environ,
+            {"STOCK_LIST": "600519", "ALPHASIFT_ENABLED": "false"},
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertFalse(config.alphasift_enabled)
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
+    def test_alphasift_honors_explicit_enabled_value(
+        self, _mock_parse_litellm_yaml, _mock_setup_env
+    ):
+        with patch.dict(
+            os.environ,
+            {"STOCK_LIST": "600519", "ALPHASIFT_ENABLED": "true"},
+            clear=True,
+        ):
+            config = Config._load_from_env()
+
+        self.assertTrue(config.alphasift_enabled)
+
+    @patch("src.config.setup_env")
+    @patch.object(Config, "_parse_litellm_yaml", return_value=[])
     def test_schedule_run_immediately_falls_back_to_legacy_run_immediately(
         self,
         _mock_parse_yaml,

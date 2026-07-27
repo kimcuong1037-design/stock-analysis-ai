@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import unittest
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict
@@ -82,7 +83,7 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
             )
         with patch(
             "src.services.alphasift_service._enrich_candidates_with_dsa",
-            side_effect=lambda candidates: (
+            side_effect=lambda candidates, **_kwargs: (
                 candidates,
                 {
                     "enabled": True,
@@ -313,6 +314,11 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         with (
             patch("api.v1.endpoints.alphasift.get_task_queue", return_value=fake_queue),
             patch("api.v1.endpoints.alphasift.uuid.uuid4", return_value=SimpleNamespace(hex="screen-task-1")),
+            patch("api.v1.endpoints.alphasift.time.monotonic", side_effect=[100.0, 100.125]),
+            patch.object(
+                alphasift_endpoint.AlphaSiftService,
+                "validate_screen_request",
+            ) as validate_mock,
             patch.object(
                 alphasift_endpoint.AlphaSiftService,
                 "screen",
@@ -329,15 +335,42 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         self.assertEqual(payload.task_id, "screen-task-1")
         self.assertEqual(payload.max_results, 3)
+        validate_mock.assert_called_once_with(strategy="dual_low", market="cn")
         fake_queue.submit_background_task.assert_called_once()
         self.assertEqual(fake_queue.submit_background_task.call_args.kwargs["report_type"], "alphasift_screen")
-        screen_mock.assert_called_once_with(strategy="dual_low", market="cn", max_results=3)
+        screen_mock.assert_called_once()
+        self.assertEqual(
+            {key: value for key, value in screen_mock.call_args.kwargs.items() if key != "progress_callback"},
+            {"strategy": "dual_low", "market": "cn", "max_results": 3},
+        )
+        self.assertTrue(callable(screen_mock.call_args.kwargs["progress_callback"]))
         self.assertEqual(result["candidate_count"], 0)
+        self.assertEqual(result["timings"]["queue_wait_ms"], 125)
         fake_queue.update_task_progress.assert_any_call(
             "screen-task-1",
             20,
             "正在执行 AlphaSift 选股，外部数据源较慢时会持续后台运行",
         )
+
+    def test_start_screen_task_rejects_disabled_before_queue_submission(self) -> None:
+        config = self._config(enabled=False)
+        fake_queue = MagicMock()
+
+        with patch("api.v1.endpoints.alphasift.get_task_queue", return_value=fake_queue):
+            with self.assertRaises(HTTPException) as caught:
+                alphasift_endpoint.alphasift_start_screen_task(
+                    alphasift_endpoint.AlphaSiftScreenRequest(
+                        market="cn",
+                        strategy="quality_value",
+                        max_results=3,
+                    ),
+                    http_request=self._request(),
+                    config=config,
+                )
+
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(caught.exception.detail["error"], "alphasift_disabled")
+        fake_queue.submit_background_task.assert_not_called()
 
     def test_screen_task_status_returns_alphasift_result(self) -> None:
         task = TaskInfo(
@@ -693,6 +726,81 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         self.assertEqual(candidate["dsa_news"][0]["title"], "贵州茅台最新公告")
         self.assertIn("DSA行情", candidate["dsa_analysis_summary"])
         self.assertEqual(payload["dsa_enrichment"]["enriched_count"], 1)
+        self.assertIn("alphasift_screen_ms", payload["timings"])
+        self.assertIn("enrich_ms", payload["timings"])
+        self.assertIn("total_ms", payload["timings"])
+
+    def test_enrichment_runs_with_bounded_concurrency_and_preserves_order(self) -> None:
+        candidates = [
+            {"code": "600001", "rank": 1},
+            {"code": "600002", "rank": 2},
+            {"code": "600003", "rank": 3},
+        ]
+        active = 0
+        peak = 0
+        lock = threading.Lock()
+
+        def build(candidate, **_kwargs):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep({"600001": 0.06, "600002": 0.04, "600003": 0.02}[candidate["code"]])
+            with lock:
+                active -= 1
+            candidate["worker_mutation"] = candidate["code"]
+            return {"dsa_context": {"enriched": True, "warnings": []}}
+
+        with patch("src.services.alphasift_service._build_dsa_candidate_context", side_effect=build):
+            enriched, diagnostics = alphasift_service._enrich_candidates_with_dsa(candidates, max_workers=2)
+
+        self.assertEqual([item["code"] for item in enriched], ["600001", "600002", "600003"])
+        self.assertEqual(peak, 2)
+        self.assertEqual(diagnostics["max_workers"], 2)
+        self.assertEqual(diagnostics["enriched_count"], 3)
+
+    def test_enrichment_max_workers_one_uses_serial_fallback(self) -> None:
+        candidates = [{"code": "600001"}, {"code": "600002"}]
+        active = 0
+        peak = 0
+
+        def build(candidate, **_kwargs):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            active -= 1
+            return {"dsa_context": {"enriched": True, "warnings": []}}
+
+        with patch("src.services.alphasift_service._build_dsa_candidate_context", side_effect=build):
+            _, diagnostics = alphasift_service._enrich_candidates_with_dsa(candidates, max_workers=1)
+
+        self.assertEqual(peak, 1)
+        self.assertEqual(diagnostics["max_workers"], 1)
+
+    def test_screen_forwards_progress_callback_only_when_adapter_supports_it(self) -> None:
+        config = self._config(enabled=True)
+        events = []
+
+        def screen(strategy, *, market, max_results, progress_callback=None, **_kwargs):
+            progress_callback("snapshot", {"snapshot_count": 12})
+            return {"candidates": []}
+
+        with (
+            patch("src.services.alphasift_service._import_alphasift", return_value=_make_adapter_module(screen=screen)),
+            patch(
+                "src.services.alphasift_service._enrich_candidates_with_dsa",
+                return_value=([], {"enabled": True, "enriched_count": 0, "warnings": []}),
+            ),
+        ):
+            payload = alphasift_service.AlphaSiftService(config).screen(
+                strategy="dual_low",
+                market="cn",
+                max_results=3,
+                progress_callback=lambda stage, metrics: events.append((stage, metrics)),
+            )
+
+        self.assertIn(("snapshot", {"snapshot_count": 12}), events)
+        self.assertEqual(payload["candidate_count"], 0)
 
     def test_screen_reuses_alphasift_dsa_context_without_refetch(self) -> None:
         config = self._config(enabled=True)
@@ -1011,6 +1119,56 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
             getattr(fake_litellm.completion, "_alphasift_litellm_completion_bridge", False),
         )
 
+    def test_screen_channel_route_overrides_legacy_litellm_credentials(self) -> None:
+        config = Config(
+            alphasift_enabled=True,
+            alphasift_install_spec=DEFAULT_ALPHASIFT_TEST_SPEC,
+            litellm_model="anthropic/k3",
+            anthropic_api_keys=["disabled-anthropic-key"],
+            llm_channels=[
+                {
+                    "name": "kimicode",
+                    "protocol": "anthropic",
+                    "enabled": True,
+                    "base_url": "https://api.kimi.example/coding",
+                    "api_keys": ["kimi-code-key"],
+                    "models": ["anthropic/k3"],
+                }
+            ],
+        )
+        completion_calls: list[dict[str, object]] = []
+
+        def completion_impl(**kwargs):
+            completion_calls.append(kwargs)
+            return SimpleNamespace(choices=[])
+
+        fake_litellm = SimpleNamespace(completion=completion_impl)
+
+        def screen_impl(_strategy: str, **_kwargs):
+            # AlphaSift appends a provider-wide direct attempt after its channel
+            # attempt. It must remain on the selected Kimi-compatible route.
+            fake_litellm.completion(
+                model="anthropic/k3",
+                api_key="disabled-anthropic-key",
+                messages=[{"role": "user", "content": "rank"}],
+            )
+            return {"candidates": []}
+
+        fake_module = _make_adapter_module(screen=MagicMock(side_effect=screen_impl))
+
+        with (
+            patch.dict(sys.modules, {"litellm": fake_litellm}, clear=False),
+            patch("src.services.alphasift_service._import_alphasift", return_value=fake_module),
+        ):
+            payload = self._screen(config, market="cn", strategy="dual_low", max_results=5)
+
+        self.assertEqual(payload["candidate_count"], 0)
+        self.assertEqual(completion_calls[0]["api_key"], "kimi-code-key")
+        self.assertEqual(
+            completion_calls[0]["api_base"],
+            "https://api.kimi.example/coding",
+        )
+
     def test_screen_bridges_legacy_openai_fields_into_alphasift_runtime_env(self) -> None:
         config = Config(
             alphasift_enabled=True,
@@ -1300,6 +1458,7 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         )
 
         completion_calls: list[Dict[str, Any]] = []
+        screen_results: Dict[str, Dict[str, Any]] = {}
         thread_b_ready = threading.Event()
         completion_lock = threading.Lock()
 
@@ -1325,19 +1484,33 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
                 api_key=(channels[0].get("api_keys") or [""])[0],
                 messages=[{"role": "user", "content": "rank"}],
             )
-            return {"candidates": []}
+            return {
+                "candidates": [
+                    {
+                        "code": "600001" if tenant == "tenant-a" else "600002",
+                        "dsa_context": {"enriched": True, "warnings": []},
+                        "dsa_news": [{"title": tenant}],
+                    }
+                ]
+            }
 
         fake_module = _make_adapter_module(screen=MagicMock(side_effect=screen_impl))
 
-        def _run_screen(config: Config) -> None:
-            self._screen(config, market="cn", strategy="dual_low", max_results=5, mock_enrichment=False)
+        def _run_screen(config: Config, result_key: str) -> None:
+            screen_results[result_key] = self._screen(
+                config,
+                market="cn",
+                strategy="dual_low",
+                max_results=5,
+                mock_enrichment=False,
+            )
 
         with (
             patch.dict(sys.modules, {"litellm": fake_litellm}, clear=False),
             patch("src.services.alphasift_service._import_alphasift", return_value=fake_module),
         ):
-            thread_a = threading.Thread(target=_run_screen, args=(config_a,))
-            thread_b = threading.Thread(target=_run_screen, args=(config_b,))
+            thread_a = threading.Thread(target=_run_screen, args=(config_a, "a"))
+            thread_b = threading.Thread(target=_run_screen, args=(config_b, "b"))
             thread_a.start()
             thread_b.start()
             thread_a.join()
@@ -1351,6 +1524,11 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
         self.assertTrue(
             thread_a.is_alive() is False and thread_b.is_alive() is False,
         )
+        self.assertEqual(screen_results["a"]["candidates"][0]["code"], "600001")
+        self.assertEqual(screen_results["b"]["candidates"][0]["code"], "600002")
+        self.assertIsNot(screen_results["a"]["timings"], screen_results["b"]["timings"])
+        self.assertIn("runtime_lock_wait_ms", screen_results["a"]["timings"])
+        self.assertIn("runtime_lock_wait_ms", screen_results["b"]["timings"])
 
     def test_screen_disabled_preserves_existing_llm_env_state(self) -> None:
         config = self._config(enabled=False)
@@ -1578,6 +1756,7 @@ class AlphaSiftOpportunitiesApiTestCase(unittest.TestCase):
 
         self.assertEqual(caught.exception.status_code, 400)
         self.assertEqual(caught.exception.detail["error"], "alphasift_screen_rejected")
+        self.assertIn("alphasift_screen_ms", caught.exception.detail["timings"])
 
 
 if __name__ == "__main__":

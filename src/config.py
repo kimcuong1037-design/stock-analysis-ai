@@ -637,9 +637,10 @@ class Config:
     longbridge_oauth_client_id: Optional[str] = None
     stock_index_remote_update_enabled: bool = True
 
-    # === AlphaSift optional stock screening integration ===
-    alphasift_enabled: bool = False
+    # === AlphaSift stock screening integration ===
+    alphasift_enabled: bool = True
     alphasift_install_spec: str = DEFAULT_ALPHASIFT_INSTALL_SPEC
+    alphasift_enrichment_max_workers: int = 3
 
     # === AI 分析配置 ===
     # LiteLLM unified model config (provider/model format, e.g. gemini/gemini-3.1-pro-preview)
@@ -1823,11 +1824,18 @@ class Config:
                 minimum=1,
             ),
             portfolio_fx_update_enabled=os.getenv('PORTFOLIO_FX_UPDATE_ENABLED', 'true').lower() == 'true',
-            alphasift_enabled=parse_env_bool(os.getenv('ALPHASIFT_ENABLED'), default=False),
+            alphasift_enabled=parse_env_bool(os.getenv('ALPHASIFT_ENABLED'), default=True),
             alphasift_install_spec=(
                 DEFAULT_ALPHASIFT_INSTALL_SPEC
                 if os.getenv('ALPHASIFT_INSTALL_SPEC') is None
                 else os.getenv('ALPHASIFT_INSTALL_SPEC', '').strip()
+            ),
+            alphasift_enrichment_max_workers=parse_env_int(
+                os.getenv("ALPHASIFT_ENRICHMENT_MAX_WORKERS"),
+                default=3,
+                field_name="ALPHASIFT_ENRICHMENT_MAX_WORKERS",
+                minimum=1,
+                maximum=3,
             ),
         )
     

@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - [修复] 英文界面下侧边栏导航项不再被长文案撑破布局，英文导航标签 Investor Profile 缩短为 Profile
 - [修复] 修复 Docker 构建失败：`requirements.txt` 中 `longbridge>=0.2.77` 不可满足（该 SDK 0.2.x 线已发布最高版本为 0.2.75，`>=0.2.77` 无匹配分发），收敛为 `longbridge>=0.2.75,<0.3` 恢复镜像构建；上界排除 API 不兼容的 4.x 线。
 - [改进] akshare 港股日线连续超时后自动熔断降级到 Yahoo Finance，避免批量港股查询重复等待；可用 AKSHARE_HK_COOLDOWN_SECONDS 调整（默认 180 秒，0 关闭）
+- [改进] AlphaSift 选股默认开启并固定显示导航入口，关闭或依赖异常时仍可进入页面查看状态与修复指引
+- [修复] AlphaSift 后台选股在入队前校验开关、适配层、市场和策略，避免关闭或不可用状态下先返回 202 并创建必然失败的任务
+- [修复] AlphaSift LLM 桥接按模型强制绑定所选渠道的 API Key、Base URL 与附加请求头，避免 Kimi 等 Anthropic/OpenAI 兼容渠道在重试时回落到同协议的旧账号
+- [改进] AlphaSift 选股增加阶段耗时诊断，并将 Top 3 候选后置增强改为可回退的有界并发，同时保持 rank 顺序和部分失败语义
 
 ## [3.21.0] - 2026-06-07
 

@@ -9,14 +9,17 @@ import json
 import logging
 import math
 import os
+import copy
 import subprocess
 import sys
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextvars import ContextVar
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field
@@ -33,6 +36,7 @@ _ALPHASIFT_INSTALL_LOCK = threading.RLock()
 ALPHASIFT_MANAGED_LITELLM_PROVIDERS = frozenset({"gemini", "vertex_ai", "anthropic", "openai", "deepseek"})
 _ALPHASIFT_RUNTIME_ENV_LOCK = threading.RLock()
 DSA_ENRICHMENT_MAX_CANDIDATES = 3
+DSA_ENRICHMENT_DEFAULT_MAX_WORKERS = 3
 DSA_PRE_RANK_CONTEXT_MAX_CANDIDATES = 3
 DSA_ALPHASIFT_LLM_CANDIDATE_MULTIPLIER = 2
 DSA_ALPHASIFT_LLM_MAX_CANDIDATES = 12
@@ -95,34 +99,77 @@ class AlphaSiftService:
         _ensure_alphasift_enabled(self.config)
         return _install_alphasift(self.config)
 
-    def screen(self, *, strategy: str, market: str, max_results: int) -> Dict[str, Any]:
+    def validate_screen_request(self, *, strategy: str, market: str) -> None:
+        """Reject unusable screen requests before a background task is created."""
         _ensure_alphasift_enabled(self.config)
         _ensure_alphasift_available_for_use()
         _ensure_supported_market(market)
         _ensure_supported_strategy(strategy)
 
+    def screen(
+        self,
+        *,
+        strategy: str,
+        market: str,
+        max_results: int,
+        progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    ) -> Dict[str, Any]:
+        self.validate_screen_request(strategy=strategy, market=market)
+
+        started = time.monotonic()
+        timings: Dict[str, int] = {}
+
+        def report(stage: str, **metrics: Any) -> None:
+            if progress_callback is not None:
+                progress_callback(stage, metrics)
+
         adapter = _get_dsa_adapter()
         screen = _get_adapter_callable(adapter, "screen", "screen() 不可调用。")
+        report("alphasift_screen")
+        stage_started = time.monotonic()
         try:
-            raw = _call_alphasift_screen(screen, strategy, market, max_results, self.config)
+            raw = _call_alphasift_screen(
+                screen,
+                strategy,
+                market,
+                max_results,
+                self.config,
+                progress_callback=progress_callback,
+                timings=timings,
+            )
         except ValueError as exc:
             raise HTTPException(
                 status_code=400,
-                detail={"error": "alphasift_screen_rejected", "message": str(exc)},
+                detail={
+                    "error": "alphasift_screen_rejected",
+                    "message": str(exc),
+                    "timings": timings,
+                },
             ) from exc
         except (TypeError, KeyError) as exc:
             raise HTTPException(
                 status_code=422,
-                detail={"error": "alphasift_invalid_input", "message": f"AlphaSift 参数非法：{exc}"},
+                detail={
+                    "error": "alphasift_invalid_input",
+                    "message": f"AlphaSift 参数非法：{exc}",
+                    "timings": timings,
+                },
             ) from exc
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(
                 status_code=424,
-                detail={"error": "alphasift_screen_failed", "message": f"AlphaSift 选股运行失败：{exc}"},
+                detail={
+                    "error": "alphasift_screen_failed",
+                    "message": f"AlphaSift 选股运行失败：{exc}",
+                    "timings": timings,
+                },
             ) from exc
+        finally:
+            timings["alphasift_screen_ms"] = _elapsed_ms(stage_started)
 
+        stage_started = time.monotonic()
         raw_data = _to_plain(raw)
         if not isinstance(raw_data, dict):
             raw_data = {"candidates": raw_data}
@@ -130,7 +177,21 @@ class AlphaSiftService:
 
         candidates = _normalize_candidates(raw_data)
         selected = candidates[:max_results]
-        selected, dsa_enrichment = _enrich_candidates_with_dsa(selected)
+        timings["normalize_ms"] = _elapsed_ms(stage_started)
+
+        report("enrich", current=0, total=min(len(selected), DSA_ENRICHMENT_MAX_CANDIDATES))
+        stage_started = time.monotonic()
+        selected, dsa_enrichment = _enrich_candidates_with_dsa(
+            selected,
+            max_workers=self.config.alphasift_enrichment_max_workers,
+        )
+        timings["enrich_ms"] = _elapsed_ms(stage_started)
+        report(
+            "finalize",
+            candidate_count=len(selected),
+            enriched_count=dsa_enrichment["enriched_count"],
+        )
+        timings["total_ms"] = _elapsed_ms(started)
         return {
             "enabled": True,
             "candidates": selected,
@@ -150,7 +211,12 @@ class AlphaSiftService:
             "warnings": raw_data.get("warnings") or [],
             "source_errors": raw_data.get("source_errors") or [],
             "dsa_enrichment": dsa_enrichment,
+            "timings": timings,
         }
+
+
+def _elapsed_ms(started: float) -> int:
+    return max(0, int(round((time.monotonic() - started) * 1000)))
 
 
 def _install_alphasift(config: Config) -> Dict[str, Any]:
@@ -555,7 +621,16 @@ def _ensure_supported_strategy(strategy: str) -> None:
     # 策略由适配层进行最终校验，因此在列表外仍保持透传。
 
 
-def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results: int, config: Config) -> Any:
+def _call_alphasift_screen(
+    screen: Any,
+    strategy: str,
+    market: str,
+    max_results: int,
+    config: Config,
+    *,
+    progress_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    timings: Optional[Dict[str, int]] = None,
+) -> Any:
     signature = inspect.signature(screen)
     params = signature.parameters
     supports_var_kwargs = any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in params.values())
@@ -570,6 +645,7 @@ def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results:
     supports_max_output = "max_output" in params or supports_var_kwargs
     supports_use_llm = "use_llm" in params or supports_var_kwargs
     supports_context = "context" in params or supports_var_kwargs
+    supports_progress_callback = "progress_callback" in params or supports_var_kwargs
 
     kwargs: Dict[str, Any] = {"market": market}
     if supports_max_results:
@@ -583,9 +659,11 @@ def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results:
         kwargs["use_llm"] = True
     if supports_context:
         kwargs["context"] = _build_alphasift_context(config, max_results=max_results)
+    if supports_progress_callback and progress_callback is not None:
+        kwargs["progress_callback"] = progress_callback
 
     with (
-        _alphasift_runtime_env(config, max_results=max_results),
+        _alphasift_runtime_env(config, max_results=max_results, timings=timings),
         _alphasift_dsa_daily_history_provider(),
         _alphasift_litellm_headers(config),
     ):
@@ -598,9 +676,10 @@ def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results:
             )
             if not signature_mismatch:
                 raise
-            if "context" in kwargs:
+            if "context" in kwargs or "progress_callback" in kwargs:
                 retry_kwargs = dict(kwargs)
                 retry_kwargs.pop("context", None)
+                retry_kwargs.pop("progress_callback", None)
                 try:
                     return screen(strategy, **retry_kwargs)
                 except TypeError as retry_exc:
@@ -611,14 +690,22 @@ def _call_alphasift_screen(screen: Any, strategy: str, market: str, max_results:
 
 
 @contextmanager
-def _alphasift_runtime_env(config: Config, *, max_results: Optional[int] = None) -> Iterator[None]:
+def _alphasift_runtime_env(
+    config: Config,
+    *,
+    max_results: Optional[int] = None,
+    timings: Optional[Dict[str, int]] = None,
+) -> Iterator[None]:
     updates = _build_alphasift_runtime_env(config, max_results=max_results)
     if not updates:
         yield
         return
 
     sentinel = object()
+    lock_started = time.monotonic()
     with _ALPHASIFT_RUNTIME_ENV_LOCK:
+        if timings is not None:
+            timings["runtime_lock_wait_ms"] = _elapsed_ms(lock_started)
         previous = {key: os.environ.get(key, sentinel) for key in updates}
         os.environ.update(updates)
         try:
@@ -716,21 +803,24 @@ def _build_alphasift_runtime_env(config: Config, *, max_results: Optional[int] =
                     json.dumps(channel.get("extra_headers"), ensure_ascii=False),
                 )
 
+    # Explicit channel routing is more specific than legacy provider-wide
+    # variables. Keep channel keys first so AlphaSift's direct-call fallback
+    # cannot silently switch to another account for the same protocol.
     gemini_keys = _dedupe_strings([
-        *(config.gemini_api_keys or []),
         *_channel_keys_for_provider(channels, {"gemini", "vertex_ai"}),
+        *(config.gemini_api_keys or []),
     ])
     anthropic_keys = _dedupe_strings([
-        *(config.anthropic_api_keys or []),
         *_channel_keys_for_provider(channels, {"anthropic"}),
+        *(config.anthropic_api_keys or []),
     ])
     openai_keys = _dedupe_strings([
-        *(config.openai_api_keys or []),
         *_channel_keys_for_provider(channels, {"openai"}),
+        *(config.openai_api_keys or []),
     ])
     deepseek_keys = _dedupe_strings([
-        *(config.deepseek_api_keys or []),
         *_channel_keys_for_provider(channels, {"deepseek"}),
+        *(config.deepseek_api_keys or []),
     ])
 
     _put_provider_keys(env, "GEMINI", gemini_keys)
@@ -816,16 +906,24 @@ def _alphasift_litellm_headers(config: Config) -> Iterator[None]:
     def completion_with_dsa_headers(*args: Any, **kwargs: Any) -> Any:
         routes = _ALPHASIFT_LITELLM_COMPLETION_ROUTES.get()
         if routes:
-            headers = _match_alphasift_litellm_headers(args, kwargs, routes)
-            if headers:
+            route = _match_alphasift_litellm_route(args, kwargs, routes)
+            if route:
+                kwargs = dict(kwargs)
+                route_api_key = _env_text(route.get("api_key"))
+                route_api_base = _env_text(route.get("api_base"))
+                if route_api_key:
+                    kwargs["api_key"] = route_api_key
+                if route_api_base:
+                    kwargs["api_base"] = route_api_base
+
+                headers = route.get("extra_headers")
+                headers = dict(headers) if isinstance(headers, dict) else {}
                 existing_headers = kwargs.get("extra_headers")
-                if isinstance(existing_headers, dict):
+                if headers and isinstance(existing_headers, dict):
                     merged_headers = dict(headers)
                     merged_headers.update(existing_headers)
-                    kwargs = dict(kwargs)
                     kwargs["extra_headers"] = merged_headers
-                elif existing_headers in (None, ""):
-                    kwargs = dict(kwargs)
+                elif headers and existing_headers in (None, ""):
                     kwargs["extra_headers"] = dict(headers)
         return original_completion(*args, **kwargs)
 
@@ -887,7 +985,10 @@ def _build_alphasift_litellm_header_routes(config: Config) -> List[Dict[str, Any
         if not isinstance(params, dict):
             continue
         headers = params.get("extra_headers")
-        if not isinstance(headers, dict) or not headers:
+        normalized_headers = dict(headers) if isinstance(headers, dict) else {}
+        api_key = _env_text(params.get("api_key"))
+        api_base = _env_text(params.get("api_base") or params.get("base_url"))
+        if not api_key and not api_base and not normalized_headers:
             continue
         model_names = _dedupe_strings([
             entry.get("model_name"),
@@ -898,15 +999,15 @@ def _build_alphasift_litellm_header_routes(config: Config) -> List[Dict[str, Any
         routes.append(
             {
                 "models": model_names,
-                "api_key": _env_text(params.get("api_key")),
-                "api_base": _env_text(params.get("api_base") or params.get("base_url")),
-                "extra_headers": dict(headers),
+                "api_key": api_key,
+                "api_base": api_base,
+                "extra_headers": normalized_headers,
             }
         )
     return routes
 
 
-def _match_alphasift_litellm_headers(
+def _match_alphasift_litellm_route(
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
     routes: List[Dict[str, Any]],
@@ -917,19 +1018,10 @@ def _match_alphasift_litellm_headers(
     if not model:
         return {}
 
-    api_key = _env_text(kwargs.get("api_key"))
-    api_base = _env_text(kwargs.get("api_base") or kwargs.get("base_url"))
     for route in routes:
         if model not in set(route.get("models") or []):
             continue
-        route_api_key = _env_text(route.get("api_key"))
-        if route_api_key and api_key and route_api_key != api_key:
-            continue
-        route_api_base = _env_text(route.get("api_base"))
-        if route_api_base and api_base and route_api_base != api_base:
-            continue
-        headers = route.get("extra_headers")
-        return dict(headers) if isinstance(headers, dict) else {}
+        return dict(route)
     return {}
 
 
@@ -1196,27 +1288,30 @@ def get_dsa_candidate_context(
     return context.get("dsa_context", {})
 
 
-def _enrich_candidates_with_dsa(candidates: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+def _enrich_candidates_with_dsa(
+    candidates: List[Dict[str, Any]],
+    *,
+    max_workers: int = DSA_ENRICHMENT_DEFAULT_MAX_WORKERS,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     enriched_count = 0
     warnings: List[str] = []
     limit = min(len(candidates), DSA_ENRICHMENT_MAX_CANDIDATES)
 
-    for index, candidate in enumerate(candidates):
-        if index >= limit:
-            continue
+    def enrich_one(index: int, source: Dict[str, Any]) -> Tuple[int, Dict[str, Any], bool, List[str]]:
+        candidate = copy.deepcopy(source)
         existing_context = candidate.get("dsa_context")
         if (
             isinstance(existing_context, dict)
             and existing_context.get("enriched")
             and _candidate_has_dsa_news(candidate)
         ):
-            enriched_count += 1
             existing_warnings = existing_context.get("warnings") or []
+            item_warnings: List[str] = []
             if isinstance(existing_warnings, list):
-                warnings.extend(str(item) for item in existing_warnings if item)
+                item_warnings.extend(str(item) for item in existing_warnings if item)
             elif existing_warnings:
-                warnings.append(str(existing_warnings))
-            continue
+                item_warnings.append(str(existing_warnings))
+            return index, candidate, True, item_warnings
         try:
             enriched = _build_dsa_candidate_context(
                 candidate,
@@ -1225,22 +1320,46 @@ def _enrich_candidates_with_dsa(candidates: List[Dict[str, Any]]) -> Tuple[List[
                 profile="post_rank_full",
             )
             candidate.update(enriched)
-            if enriched.get("dsa_context", {}).get("enriched"):
-                enriched_count += 1
-            warnings.extend(enriched.get("dsa_context", {}).get("warnings") or [])
+            return (
+                index,
+                candidate,
+                bool(enriched.get("dsa_context", {}).get("enriched")),
+                list(enriched.get("dsa_context", {}).get("warnings") or []),
+            )
         except Exception as exc:  # noqa: BLE001 - DSA enrichment must not block screening.
             code = candidate.get("code") or f"rank-{candidate.get('rank', index + 1)}"
             message = f"{code}: {exc}"
-            warnings.append(message)
             logger.warning("DSA enrichment failed for AlphaSift candidate %s: %s", code, exc)
             candidate["dsa_context"] = {
                 "enriched": False,
                 "warnings": [message],
             }
+            return index, candidate, False, [message]
+
+    worker_count = max(1, min(int(max_workers), limit)) if limit else 1
+    results: List[Tuple[int, Dict[str, Any], bool, List[str]]] = []
+    if worker_count == 1:
+        results = [enrich_one(index, candidates[index]) for index in range(limit)]
+    else:
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="alphasift_enrich_",
+        ) as executor:
+            futures = [
+                executor.submit(enrich_one, index, candidates[index])
+                for index in range(limit)
+            ]
+            results = [future.result() for future in as_completed(futures)]
+
+    for index, candidate, enriched, item_warnings in sorted(results, key=lambda item: item[0]):
+        candidates[index] = candidate
+        enriched_count += int(enriched)
+        warnings.extend(item_warnings)
 
     return candidates, {
         "enabled": True,
         "max_candidates": DSA_ENRICHMENT_MAX_CANDIDATES,
+        "max_workers": worker_count,
         "requested_count": limit,
         "enriched_count": enriched_count,
         "warnings": _dedupe_strings(warnings),
